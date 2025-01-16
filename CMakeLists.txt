@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(RGLGazeboPlugin)
+project(rgl_gazebo_plugin)
 
 if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install")
