@@ -196,6 +196,7 @@ Inside the link entity in your model, add a custom sensor:
   <pattern_preset>Alpha Prime</pattern_preset>
   <pattern_preset>Puck</pattern_preset>
   <pattern_preset>Ultra Puck</pattern_preset>
+  <pattern_preset>OS0 128</pattern_preset>
   <pattern_preset>OS1 64</pattern_preset>
   <pattern_preset>Pandar64</pattern_preset>
   <pattern_preset>Pandar40P</pattern_preset>

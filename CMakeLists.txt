@@ -9,6 +9,7 @@ endif()
 
 install(FILES
     lidar_patterns/LivoxMid360.mat3x4f
+    lidar_patterns/OusterOS0_128.mat3x4f
     DESTINATION share/${PROJECT_NAME}/lidar_patterns
     )
 install (DIRECTORY test_world DESTINATION share/${PROJECT_NAME})

@@ -31,6 +31,7 @@ std::map<std::string, std::pair<std::string, std::size_t>> LidarPatternLoader::p
     {"Alpha Prime", {"VelodyneVLS128.mat3x4f", 1}},
     {"Puck", {"VelodyneVLP16.mat3x4f", 1}},
     {"Ultra Puck", {"VelodyneVLP32C.mat3x4f", 1}},
+    {"OS0 128", {"OusterOS0_128.mat3x4f", 1}},
     {"OS1 64", {"OusterOS1_64.mat3x4f", 1}},
     {"Pandar64", {"HesaiPandarQT64.mat3x4f", 1}},
     {"Pandar40P", {"HesaiPandar40P.mat3x4f", 1}},
