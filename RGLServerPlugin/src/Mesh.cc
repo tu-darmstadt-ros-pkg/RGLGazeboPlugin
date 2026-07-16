@@ -280,11 +280,18 @@ bool RGLServerPluginManager::LoadMeshToRGL(
 
     bool success = CheckRGL(rgl_mesh_create(mesh, rglVertices.data(), vertexCount, triangles, triangleCount));
 
-    if (success && rglUvs.size() == static_cast<std::size_t>(vertexCount)) {
-        // Not fatal: without texture coordinates the point cloud color falls back to white.
-        if (!CheckRGL(rgl_mesh_set_texture_coords(*mesh, rglUvs.data(), vertexCount))) {
-            gzwarn << "Failed to set texture coordinates for mesh in RGL. "
-                   << "Point cloud color will not be available for this mesh.\n";
+    if (success) {
+        if (rglUvs.size() == static_cast<std::size_t>(vertexCount)) {
+            // Not fatal: without texture coordinates the point cloud color falls back to white.
+            if (!CheckRGL(rgl_mesh_set_texture_coords(*mesh, rglUvs.data(), vertexCount))) {
+                gzwarn << "Failed to set texture coordinates for mesh in RGL. "
+                       << "Point cloud color will not be available for this mesh.\n";
+            }
+        } else {
+            // Should not happen: submesh vertex counts disagree with FillArrays output.
+            gzwarn << "Gathered " << rglUvs.size() << " texture coordinates for a mesh with "
+                   << vertexCount << " vertices. Skipping UV upload; point cloud color will "
+                   << "not be available for this mesh.\n";
         }
     }
 

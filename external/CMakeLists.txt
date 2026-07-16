@@ -51,10 +51,23 @@ if(RGL_CUSTOM_LIBRARY_PATH AND RGL_CUSTOM_API_HEADER_PATH) # Copy custom Robotec
     file(COPY ${RGL_CUSTOM_LIBRARY_PATH} DESTINATION ${RGL_LIBRARY_DIR})
     file(COPY ${RGL_CUSTOM_API_HEADER_PATH} DESTINATION ${RGL_PROJECT_DIR})
 elseif(RGL_BUILD_FROM_SOURCE) # Clone and build RobotecGPULidar from source
+    # Rebuild from scratch when the configured sources change, so an existing build
+    # directory cannot silently keep linking an RGL built from different refs.
+    set(RGL_SOURCES_STAMP "${RGL_GIT_REPOSITORY};${RGL_GIT_TAG};${RGL_OPTIX_GIT_REPOSITORY};${RGL_OPTIX_GIT_TAG}")
+    set(RGL_STAMP_FILE "${CMAKE_CURRENT_BINARY_DIR}/rgl-sources.stamp")
+    set(RGL_SRC_DIR "${CMAKE_CURRENT_BINARY_DIR}/RobotecGPULidar-src")
+    set(OPTIX_DIR "${CMAKE_CURRENT_BINARY_DIR}/optix-dev")
+    if(EXISTS ${RGL_STAMP_FILE})
+        file(READ ${RGL_STAMP_FILE} RGL_PREVIOUS_STAMP)
+        if(NOT RGL_PREVIOUS_STAMP STREQUAL RGL_SOURCES_STAMP)
+            message(STATUS "RobotecGPULidar source configuration changed; rebuilding from scratch.")
+            file(REMOVE_RECURSE ${RGL_SRC_DIR} ${OPTIX_DIR} ${RGL_PROJECT_DIR})
+            file(REMOVE ${RGL_STAMP_FILE})
+        endif()
+    endif()
+
     if(NOT EXISTS ${RGL_SO_PATH})
-        set(RGL_SRC_DIR "${CMAKE_CURRENT_BINARY_DIR}/RobotecGPULidar-src")
         set(RGL_BUILD_DIR "${RGL_SRC_DIR}/build")
-        set(OPTIX_DIR "${CMAKE_CURRENT_BINARY_DIR}/optix-dev")
 
         # OptiX is header-only at build time (the implementation ships with the NVIDIA
         # driver), so cloning the official header repo replaces a manual SDK install.
@@ -64,10 +77,13 @@ elseif(RGL_BUILD_FROM_SOURCE) # Clone and build RobotecGPULidar from source
                 git clone --depth 1 --branch ${RGL_OPTIX_GIT_TAG} ${RGL_OPTIX_GIT_REPOSITORY} ${OPTIX_DIR})
         endif()
 
+        # Plain clone + checkout so RGL_GIT_TAG may be a branch, tag, or commit SHA.
         if(NOT EXISTS "${RGL_SRC_DIR}/CMakeLists.txt")
             message(STATUS "Cloning RobotecGPULidar (${RGL_GIT_TAG}) from ${RGL_GIT_REPOSITORY}...")
             rgl_run_step("clone RobotecGPULidar"
-                git clone --branch ${RGL_GIT_TAG} ${RGL_GIT_REPOSITORY} ${RGL_SRC_DIR})
+                git clone ${RGL_GIT_REPOSITORY} ${RGL_SRC_DIR})
+            rgl_run_step("checkout RobotecGPULidar ref"
+                git -C ${RGL_SRC_DIR} checkout ${RGL_GIT_TAG})
         endif()
 
         # Clones RGL's third-party dependencies (spdlog, yaml-cpp, ...); idempotent.
@@ -101,6 +117,7 @@ elseif(RGL_BUILD_FROM_SOURCE) # Clone and build RobotecGPULidar from source
         file(MAKE_DIRECTORY ${RGL_LIBRARY_DIR})
         file(COPY "${RGL_BUILD_DIR}/lib/${RGL_SO_FILENAME}" DESTINATION ${RGL_LIBRARY_DIR})
         file(COPY "${RGL_SRC_DIR}/include" DESTINATION ${RGL_PROJECT_DIR})
+        file(WRITE ${RGL_STAMP_FILE} "${RGL_SOURCES_STAMP}")
     endif()
 else() # Download RobotecGPULidar from the release
     message(WARNING "Downloading a stock RobotecGPULidar release: it lacks the colored-point-cloud "

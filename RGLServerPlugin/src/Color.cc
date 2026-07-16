@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <regex>
 
 #include <gz/common/Image.hh>
 #include <gz/common/Material.hh>
@@ -103,6 +104,30 @@ rgl_texture_t RGLServerPluginManager::GetColorTextureFromColor(const gz::math::C
 
     colorTextureCache.insert({cacheKey, texture});
     return texture;
+}
+
+bool RGLServerPluginManager::PluginRequestsColor(const std::string& pluginInnerXml)
+{
+    // The lidar instance plugin parses this parameter itself (see RGLServerPluginInstance);
+    // the manager only needs to know whether any lidar will ask for color at all.
+    static const std::regex publishColorRegex(
+            "<publish_color>\\s*(true|1)\\s*</publish_color>", std::regex::icase);
+    return std::regex_search(pluginInnerXml, publishColorRegex);
+}
+
+void RGLServerPluginManager::AssignColorTexturesToLoadedEntities(const gz::sim::EntityComponentManager& ecm)
+{
+    for (const auto& [entity, rglEntityMesh] : entitiesInRgl) {
+        auto* geometry = ecm.Component<gz::sim::components::Geometry>(entity);
+        if (geometry == nullptr) {
+            continue;
+        }
+        if (rgl_texture_t colorTexture = GetColorTexture(entity, ecm, geometry->Data())) {
+            if (!CheckRGL(rgl_entity_set_color_texture(rglEntityMesh.first, colorTexture))) {
+                gzwarn << "Failed to set color texture for entity (" << entity << ").\n";
+            }
+        }
+    }
 }
 
 rgl_texture_t RGLServerPluginManager::GetColorTexture(

@@ -51,6 +51,12 @@ bool RGLServerPluginManager::RegisterNewLidarCb(
                     entitiesToIgnore.insert(descendant);
                 }
             }
+            if (!colorTexturesEnabled && PluginRequestsColor(plugin.innerxml())) {
+                gzmsg << "A lidar with publish_color enabled was registered; "
+                      << "loading color textures for scene entities.\n";
+                colorTexturesEnabled = true;
+                AssignColorTexturesToLoadedEntities(ecm);
+            }
         }
     }
 
@@ -111,9 +117,11 @@ bool RGLServerPluginManager::LoadEntityToRGLCb(
     }
     // Assign a color texture from the visual's material so lidars can output colored point clouds
     // (RGL_FIELD_COLOR_RGBA_U32). Not fatal on failure; such points are colored white.
-    if (rgl_texture_t colorTexture = GetColorTexture(entity, ecm, geometry->Data())) {
-        if (!CheckRGL(rgl_entity_set_color_texture(rglEntity, colorTexture))) {
-            gzwarn << "Failed to set color texture for entity (" << entity << ").\n";
+    if (colorTexturesEnabled) {
+        if (rgl_texture_t colorTexture = GetColorTexture(entity, ecm, geometry->Data())) {
+            if (!CheckRGL(rgl_entity_set_color_texture(rglEntity, colorTexture))) {
+                gzwarn << "Failed to set color texture for entity (" << entity << ").\n";
+            }
         }
     }
     entitiesInRgl.insert({entity, {rglEntity, rglMesh}});

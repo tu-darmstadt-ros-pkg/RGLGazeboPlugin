@@ -80,6 +80,11 @@ private:
     // Key: texture image path ("file:<path>") or packed color ("rgba:<hex>").
     std::unordered_map<std::string, rgl_texture_t> colorTextureCache;
 
+    // Color textures are only resolved and uploaded once at least one lidar with
+    // <publish_color>true</publish_color> exists, so worlds without colored lidars
+    // pay no texture I/O or GPU memory cost.
+    bool colorTexturesEnabled{false};
+
     ////////////////////////////////////////////// Functions /////////////////////////////////////////////
 
     ////////////////////////////// Scene ////////////////////////////////
@@ -176,6 +181,13 @@ private:
 
     // Returns a cached (or newly created) 1x1 4-channel RGL texture of a uniform color.
     rgl_texture_t GetColorTextureFromColor(const gz::math::Color& color);
+
+    // Returns true if the given plugin XML content requests colored point clouds.
+    static bool PluginRequestsColor(const std::string& pluginInnerXml);
+
+    // Resolves and assigns color textures to entities that were loaded to RGL before
+    // the first color-publishing lidar was registered.
+    void AssignColorTexturesToLoadedEntities(const gz::sim::EntityComponentManager& ecm);
 };
 
 } // namespace rgl
