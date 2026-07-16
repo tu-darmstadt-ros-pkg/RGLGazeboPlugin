@@ -57,8 +57,8 @@ void RGLServerPluginManager::PostUpdate(
             });
 
     ecm.EachNew<gz::sim::components::Visual, gz::sim::components::Geometry>
-            ([this](auto&& entity, auto&& visual, auto&& geometry) {
-                return LoadEntityToRGLCb(entity, visual, geometry);
+            ([this, &ecm](auto&& entity, auto&& visual, auto&& geometry) {
+                return LoadEntityToRGLCb(entity, visual, geometry, ecm);
             });
 
     ecm.EachNew<gz::sim::components::LaserRetro>

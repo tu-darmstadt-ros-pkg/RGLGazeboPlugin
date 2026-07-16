@@ -205,6 +205,28 @@ RGLServerPluginManager::MeshInfo RGLServerPluginManager::GetMeshPointer(
     }
 }
 
+namespace
+{
+
+// Collects per-vertex texture coordinates in the same vertex order as FillArrays produces.
+// Vertices of a multi-submesh Mesh are concatenated in submesh order.
+// Missing texture coordinates are filled with (0, 0), so entities with uniform
+// (1x1) color textures are colored correctly even when the mesh has no UVs.
+void AppendTexCoords(const gz::common::SubMesh& subMesh, std::vector<rgl_vec2f>& uvs)
+{
+    const bool hasTexCoords = subMesh.TexCoordCount() == subMesh.VertexCount();
+    for (unsigned int i = 0; i < subMesh.VertexCount(); ++i) {
+        if (hasTexCoords) {
+            auto uv = subMesh.TexCoord(i);
+            uvs.push_back(rgl_vec2f{static_cast<float>(uv.X()), static_cast<float>(uv.Y())});
+        } else {
+            uvs.push_back(rgl_vec2f{0.0f, 0.0f});
+        }
+    }
+}
+
+}  // namespace
+
 bool RGLServerPluginManager::LoadMeshToRGL(
         rgl_mesh_t* mesh,
         const sdf::Geometry& data)
@@ -224,6 +246,7 @@ bool RGLServerPluginManager::LoadMeshToRGL(
     int triangleCount;
     double* ignVertices = nullptr;
     std::vector<rgl_vec3f> rglVertices;  // separated array because ign operates on doubles, and rgl on floats
+    std::vector<rgl_vec2f> rglUvs;
     rgl_vec3i* triangles = nullptr;
 
     if (std::holds_alternative<gz::common::SubMesh>(meshInfo)) {
@@ -231,13 +254,21 @@ bool RGLServerPluginManager::LoadMeshToRGL(
         vertexCount = static_cast<int>(ignSubMesh.VertexCount());
         triangleCount = static_cast<int>(ignSubMesh.IndexCount() / 3);
         rglVertices.reserve(vertexCount);
+        rglUvs.reserve(vertexCount);
         ignSubMesh.FillArrays(&ignVertices, reinterpret_cast<int**>(&triangles));
+        AppendTexCoords(ignSubMesh, rglUvs);
     } else {
         auto ignMesh = get<const gz::common::Mesh*>(meshInfo);
         vertexCount = static_cast<int>(ignMesh->VertexCount());
         triangleCount = static_cast<int>(ignMesh->IndexCount() / 3);
         rglVertices.reserve(vertexCount);
+        rglUvs.reserve(vertexCount);
         ignMesh->FillArrays(&ignVertices, reinterpret_cast<int**>(&triangles));
+        for (unsigned int subMeshIdx = 0; subMeshIdx < ignMesh->SubMeshCount(); ++subMeshIdx) {
+            if (auto subMesh = ignMesh->SubMeshByIndex(subMeshIdx).lock()) {
+                AppendTexCoords(*subMesh, rglUvs);
+            }
+        }
     }
 
     for (int i = 0; i < vertexCount; ++i) {
@@ -248,6 +279,14 @@ bool RGLServerPluginManager::LoadMeshToRGL(
     }
 
     bool success = CheckRGL(rgl_mesh_create(mesh, rglVertices.data(), vertexCount, triangles, triangleCount));
+
+    if (success && rglUvs.size() == static_cast<std::size_t>(vertexCount)) {
+        // Not fatal: without texture coordinates the point cloud color falls back to white.
+        if (!CheckRGL(rgl_mesh_set_texture_coords(*mesh, rglUvs.data(), vertexCount))) {
+            gzwarn << "Failed to set texture coordinates for mesh in RGL. "
+                   << "Point cloud color will not be available for this mesh.\n";
+        }
+    }
 
     free(ignVertices);
     free(triangles);

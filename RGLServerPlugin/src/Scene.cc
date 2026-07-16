@@ -89,7 +89,8 @@ bool RGLServerPluginManager::UnregisterLidarCb(
 bool RGLServerPluginManager::LoadEntityToRGLCb(
         const gz::sim::Entity& entity,
         const gz::sim::components::Visual*,
-        const gz::sim::components::Geometry* geometry)
+        const gz::sim::components::Geometry* geometry,
+        const gz::sim::EntityComponentManager& ecm)
 {
     if (entitiesToIgnore.contains(entity)) {
         return true;
@@ -107,6 +108,13 @@ bool RGLServerPluginManager::LoadEntityToRGLCb(
     if (!CheckRGL(rgl_entity_create(&rglEntity, nullptr, rglMesh))) {
         gzerr << "Failed to load entity (" << entity << ") to RGL. Skipping...\n";
         return true;
+    }
+    // Assign a color texture from the visual's material so lidars can output colored point clouds
+    // (RGL_FIELD_COLOR_RGBA_U32). Not fatal on failure; such points are colored white.
+    if (rgl_texture_t colorTexture = GetColorTexture(entity, ecm, geometry->Data())) {
+        if (!CheckRGL(rgl_entity_set_color_texture(rglEntity, colorTexture))) {
+            gzwarn << "Failed to set color texture for entity (" << entity << ").\n";
+        }
     }
     entitiesInRgl.insert({entity, {rglEntity, rglMesh}});
     return true;

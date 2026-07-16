@@ -93,8 +93,9 @@ private:
     {
         std::vector<char> data{};
         int32_t hitPointCount{};
-        static constexpr std::size_t pointSize{sizeof(rgl_vec3f) + sizeof(float)};  // Based on rglFields
-        inline static const std::vector<rgl_field_t> rglFields = {
+        // Extended with RGL_FIELD_COLOR_RGBA_U32 (+ sizeof(uint32_t)) when publish_color is enabled
+        std::size_t pointSize{sizeof(rgl_vec3f) + sizeof(float)};  // Based on rglFields
+        std::vector<rgl_field_t> rglFields = {
                 RGL_FIELD_XYZ_VEC3_F32,
                 RGL_FIELD_LASER_RETRO_F32
         };
@@ -113,6 +114,7 @@ private:
 
     bool updateOnPausedSim = false;
     bool publishLaserScan = false;
+    bool publishColor = false;
 
     gz::sim::Entity thisLidarEntity;
     gz::transport::Node::Publisher pointCloudPublisher;

@@ -24,6 +24,7 @@
 #define PARAM_TOPIC_ID "topic"
 #define PARAM_FRAME_ID "frame"
 #define PARAM_UPDATE_ON_PAUSED_SIM_ID "update_on_paused_sim"
+#define PARAM_PUBLISH_COLOR_ID "publish_color"
 
 namespace rgl
 {
@@ -80,6 +81,15 @@ bool RGLServerPluginInstance::LoadConfiguration(const std::shared_ptr<const sdf:
     if ((lidarPattern.size() % lidarPatternSampleSize) != 0) {
         gzerr << "Total pattern size (" << lidarPattern.size() << ") must be a multiple of the sample size (" << lidarPatternSampleSize << "). Disabling plugin.\n";
         return false;
+    }
+
+    // Optional colored point cloud (RGB sampled from entity materials/textures)
+    if (sdf->HasElement(PARAM_PUBLISH_COLOR_ID)) {
+        publishColor = sdf->Get<bool>(PARAM_PUBLISH_COLOR_ID);
+    }
+    if (publishColor) {
+        resultPointCloud.rglFields.push_back(RGL_FIELD_COLOR_RGBA_U32);
+        resultPointCloud.pointSize += sizeof(uint32_t);
     }
 
     // Check for 2d pattern and get LaserScan parameters
@@ -319,9 +329,15 @@ gz::msgs::LaserScan RGLServerPluginInstance::CreateLaserScanMsg(std::chrono::ste
 gz::msgs::PointCloudPacked RGLServerPluginInstance::CreatePointCloudMsg(std::chrono::steady_clock::duration simTime, const std::string& frame)
 {
     gz::msgs::PointCloudPacked outMsg;
-    gz::msgs::InitPointCloudPacked(outMsg, frame, false,
-                                         {{"xyz", gz::msgs::PointCloudPacked::Field::FLOAT32},
-                                          {"intensity",gz::msgs::PointCloudPacked::Field::FLOAT32}});
+    std::vector<std::pair<std::string, gz::msgs::PointCloudPacked::Field::DataType>> msgFields = {
+            {"xyz", gz::msgs::PointCloudPacked::Field::FLOAT32},
+            {"intensity", gz::msgs::PointCloudPacked::Field::FLOAT32}};
+    if (publishColor) {
+        // RGL_FIELD_COLOR_RGBA_U32 is packed as 0xAARRGGBB, which matches the memory layout
+        // of the float-typed "rgb" field convention used by PCL, RViz and ros_gz_bridge.
+        msgFields.emplace_back("rgb", gz::msgs::PointCloudPacked::Field::FLOAT32);
+    }
+    gz::msgs::InitPointCloudPacked(outMsg, frame, false, msgFields);
     outMsg.mutable_data()->resize(resultPointCloud.hitPointCount * outMsg.point_step());
     *outMsg.mutable_header()->mutable_stamp() = gz::msgs::Convert(simTime);
     outMsg.set_height(1);

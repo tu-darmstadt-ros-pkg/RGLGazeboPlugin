@@ -156,6 +156,8 @@ Inside the link entity in your model, add a custom sensor:
 
 - **update_on_paused_sim** - determines whether the lidar is active when the simulation is paused (optional, default: false).
 
+- **publish_color** - adds an `rgb` field (packed float, PCL/RViz convention) to the point cloud message, colored from the materials of the hit visuals (optional, default: false). The color is resolved per visual: PBR albedo texture of the SDF material, mesh-embedded material texture, or the diffuse color as fallback. Visuals with no material yield white points. Requires a RobotecGPULidar build with `RGL_FIELD_COLOR_RGBA_U32` support. Not available for 2D lidars (LaserScan output).
+
 - **pattern_\<type\>** - definition of the lidar firing pattern. Each type has different parameters described below.
 
 ### Pattern types:
