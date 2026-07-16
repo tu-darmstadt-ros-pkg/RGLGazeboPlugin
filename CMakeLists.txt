@@ -3,12 +3,13 @@ project(rgl_gazebo_plugin)
 
 find_package(ament_cmake REQUIRED)
 
-# RobotecGPULidar only ships x86_64 prebuilt binaries (see external/CMakeLists.txt).
-# On arm64 the downloaded .so is wrong-format and linking fails. There is no upstream
-# arm64 release, so skip the build.
+# RGL requires the OptiX runtime, which NVIDIA ships only with desktop/server GPU
+# drivers - it is not available on Jetson (Tegra), our only arm64 target. A source
+# build would compile on arm64, but the plugin could never run there, so skip.
+# Simulation on arm64 falls back to the native gz gpu_lidar sensor (use_rgl=false).
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
     message(WARNING
-        "rgl_gazebo_plugin: RobotecGPULidar has no arm64 prebuilt binary; skipping build on "
+        "rgl_gazebo_plugin: OptiX is not available on Jetson; skipping build on "
         "${CMAKE_SYSTEM_PROCESSOR}.")
     ament_package()
     return()
