@@ -18,6 +18,7 @@
 #include "RGLServerPluginManager.hh"
 
 #define PARAM_DO_IGNORE_ENTITIES_IN_LIDAR_LINK_ID "do_ignore_entities_in_lidar_link"
+#define PARAM_DO_UPDATE_STATIC_ENTITY_TRANSFORMS_ID "do_update_static_entity_transforms"
 
 GZ_ADD_PLUGIN(
     rgl::RGLServerPluginManager,
@@ -44,6 +45,9 @@ void RGLServerPluginManager::Configure(
 
     if (sdf->HasElement(PARAM_DO_IGNORE_ENTITIES_IN_LIDAR_LINK_ID)) {
         doIgnoreEntitiesInLidarLink = sdf->Get<bool>(PARAM_DO_IGNORE_ENTITIES_IN_LIDAR_LINK_ID);
+    }
+    if (sdf->HasElement(PARAM_DO_UPDATE_STATIC_ENTITY_TRANSFORMS_ID)) {
+        doUpdateStaticEntityTransforms = sdf->Get<bool>(PARAM_DO_UPDATE_STATIC_ENTITY_TRANSFORMS_ID);
     }
 }
 

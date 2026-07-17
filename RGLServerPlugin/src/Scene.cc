@@ -14,6 +14,7 @@
 
 #include <gz/sim/components/CustomSensor.hh>
 #include <gz/sim/components/Link.hh>
+#include <gz/sim/components/Static.hh>
 #include <gz/sim/components/SystemPluginInfo.hh>
 
 #include "RGLServerPluginManager.hh"
@@ -125,6 +126,15 @@ bool RGLServerPluginManager::LoadEntityToRGLCb(
         }
     }
     entitiesInRgl.insert({entity, {rglEntity, rglMesh}});
+    if (!doUpdateStaticEntityTransforms && IsStaticEntity(entity, ecm)) {
+        // Static entities get their transform once here and are skipped in
+        // UpdateRGLEntityTransforms afterwards.
+        rgl_mat3x4f rglMatrix = FindWorldPoseInRglMatrix(entity, ecm);
+        if (!CheckRGL(rgl_entity_set_transform(rglEntity, &rglMatrix))) {
+            gzerr << "Failed to set transform for static entity (" << entity << ").\n";
+        }
+        staticEntities.insert(entity);
+    }
     return true;
 }
 
@@ -148,6 +158,7 @@ bool RGLServerPluginManager::RemoveEntityFromRGLCb(
         gzerr << "Failed to remove mesh from entity (" << entity << ") in RGL.\n";
     }
     entitiesInRgl.erase(entity);
+    staticEntities.erase(entity);
     return true;
 }
 
@@ -175,11 +186,28 @@ bool RGLServerPluginManager::SetLaserRetroCb(
 void RGLServerPluginManager::UpdateRGLEntityTransforms(const gz::sim::EntityComponentManager& ecm)
 {
     for (auto entity: entitiesInRgl) {
+        if (staticEntities.contains(entity.first)) {
+            continue;
+        }
         rgl_mat3x4f rglMatrix = FindWorldPoseInRglMatrix(entity.first, ecm);
         if (!CheckRGL(rgl_entity_set_transform(entity.second.first, &rglMatrix))) {
             gzerr << "Failed to update transform for entity (" << entity.first << ").\n";
         }
     }
+}
+
+bool RGLServerPluginManager::IsStaticEntity(
+        gz::sim::Entity entity,
+        const gz::sim::EntityComponentManager& ecm) const
+{
+    for (auto current = entity; current != gz::sim::kNullEntity;
+         current = ecm.ParentEntity(current)) {
+        auto staticComp = ecm.Component<gz::sim::components::Static>(current);
+        if (staticComp != nullptr && staticComp->Data()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::unordered_set<gz::sim::Entity> RGLServerPluginManager::GetEntitiesInParentLink(

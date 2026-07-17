@@ -64,6 +64,14 @@ private:
     // whether to ignore entities attached to the same link as the lidar
     bool doIgnoreEntitiesInLidarLink{true};
 
+    // entities belonging to static models; their RGL transform is set once on load
+    // and skipped in the per-step transform update
+    std::unordered_set<gz::sim::Entity> staticEntities;
+
+    // update transforms of static entities every step anyway; only needed if static
+    // models are moved at runtime (e.g. dragged in the GUI or via set_pose)
+    bool doUpdateStaticEntityTransforms{false};
+
     // the entity ids, that the lidars are attached to
     std::unordered_set<gz::sim::Entity> lidarEntities;
 
@@ -113,6 +121,11 @@ private:
         const gz::sim::components::LaserRetro* laser_retro);
 
     void UpdateRGLEntityTransforms(const gz::sim::EntityComponentManager& ecm);
+
+    // true if the entity or any ancestor model is marked <static>
+    bool IsStaticEntity(
+        gz::sim::Entity entity,
+        const gz::sim::EntityComponentManager& ecm) const;
 
     std::unordered_set<gz::sim::Entity> GetEntitiesInParentLink(
         gz::sim::Entity entity,
