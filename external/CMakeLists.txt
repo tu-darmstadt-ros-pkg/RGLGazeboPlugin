@@ -64,6 +64,12 @@ elseif(RGL_BUILD_FROM_SOURCE) # Clone and build RobotecGPULidar from source
             file(REMOVE_RECURSE ${RGL_SRC_DIR} ${OPTIX_DIR} ${RGL_PROJECT_DIR})
             file(REMOVE ${RGL_STAMP_FILE})
         endif()
+    elseif(EXISTS ${RGL_SO_PATH})
+        # A library exists but no stamp: the build directory predates the source-build
+        # mechanism (e.g. it still holds a downloaded stock release).
+        # Its origin is unknown - rebuild from scratch.
+        message(STATUS "Found RobotecGPULidar of unknown origin in the build directory; rebuilding from scratch.")
+        file(REMOVE_RECURSE ${RGL_SRC_DIR} ${OPTIX_DIR} ${RGL_PROJECT_DIR})
     endif()
 
     if(NOT EXISTS ${RGL_SO_PATH})
