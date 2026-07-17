@@ -11,7 +11,7 @@ set(GZ_SIM_VER ${gz-sim8_VERSION_MAJOR})
 
 include_directories(include)
 
-add_library(RGLServerPluginManager SHARED src/RGLServerPluginManager.cc src/Mesh.cc src/Utils.cc src/Scene.cc)
+add_library(RGLServerPluginManager SHARED src/RGLServerPluginManager.cc src/Mesh.cc src/Utils.cc src/Scene.cc src/Color.cc)
 target_include_directories(RGLServerPluginManager PRIVATE RobotecGPULidar)
 target_link_libraries(RGLServerPluginManager
     PRIVATE gz-plugin${GZ_PLUGIN_VER}::gz-plugin${GZ_PLUGIN_VER}

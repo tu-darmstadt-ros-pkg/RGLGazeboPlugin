@@ -22,6 +22,7 @@
 
 #include <gz/sim/components/Geometry.hh>
 #include <gz/sim/components/LaserRetro.hh>
+#include <gz/sim/components/Material.hh>
 #include <gz/sim/components/Visual.hh>
 #include <gz/sim/System.hh>
 
@@ -73,6 +74,17 @@ private:
 
     gz::common::MeshManager* meshManager{gz::common::MeshManager::Instance()};
 
+    ////////////////////////////// Color ////////////////////////////////
+
+    // Cache of RGL color textures, shared between entities.
+    // Key: texture image path ("file:<path>") or packed color ("rgba:<hex>").
+    std::unordered_map<std::string, rgl_texture_t> colorTextureCache;
+
+    // Color textures are only resolved and uploaded once at least one lidar with
+    // <publish_color>true</publish_color> exists, so worlds without colored lidars
+    // pay no texture I/O or GPU memory cost.
+    bool colorTexturesEnabled{false};
+
     ////////////////////////////////////////////// Functions /////////////////////////////////////////////
 
     ////////////////////////////// Scene ////////////////////////////////
@@ -88,7 +100,8 @@ private:
     bool LoadEntityToRGLCb(
         const gz::sim::Entity& entity,
         const gz::sim::components::Visual*,
-        const gz::sim::components::Geometry* geometry);
+        const gz::sim::components::Geometry* geometry,
+        const gz::sim::EntityComponentManager& ecm);
 
     bool RemoveEntityFromRGLCb(
         const gz::sim::Entity& entity,
@@ -152,6 +165,29 @@ private:
         double& scaleZ);
 
     bool LoadMeshToRGL(rgl_mesh_t* mesh, const sdf::Geometry& data);
+
+    ////////////////////////////// Color ////////////////////////////////
+
+    // Determines the color source of a visual (SDF material or mesh-embedded material)
+    // and returns an RGL color texture for it (cached). Returns nullptr if no color
+    // source could be determined.
+    rgl_texture_t GetColorTexture(
+        const gz::sim::Entity& entity,
+        const gz::sim::EntityComponentManager& ecm,
+        const sdf::Geometry& geometry);
+
+    // Returns a cached (or newly created) 4-channel RGL texture from an image file.
+    rgl_texture_t GetColorTextureFromFile(const std::string& texturePath);
+
+    // Returns a cached (or newly created) 1x1 4-channel RGL texture of a uniform color.
+    rgl_texture_t GetColorTextureFromColor(const gz::math::Color& color);
+
+    // Returns true if the given plugin XML content requests colored point clouds.
+    static bool PluginRequestsColor(const std::string& pluginInnerXml);
+
+    // Resolves and assigns color textures to entities that were loaded to RGL before
+    // the first color-publishing lidar was registered.
+    void AssignColorTexturesToLoadedEntities(const gz::sim::EntityComponentManager& ecm);
 };
 
 } // namespace rgl
