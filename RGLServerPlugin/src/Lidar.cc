@@ -248,6 +248,18 @@ void RGLServerPluginInstance::RayTrace(std::chrono::steady_clock::duration simTi
         gzerr << "Failed to perform raytrace.\n";
         return;
     }
+    // rgl_graph_run only queues GPU work; results are collected next PreUpdate.
+    raytracePending = true;
+    pendingRaytraceTime = simTime;
+}
+
+void RGLServerPluginInstance::FetchAndPublishRaytraceResults()
+{
+    if (!raytracePending) {
+        return;
+    }
+    raytracePending = false;
+    const auto simTime = pendingRaytraceTime;
 
     if (publishLaserScan) {
         if (!FetchLaserScanResult()) {

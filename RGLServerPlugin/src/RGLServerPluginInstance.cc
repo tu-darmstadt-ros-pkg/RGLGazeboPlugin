@@ -45,6 +45,8 @@ void RGLServerPluginInstance::PreUpdate(
         const gz::sim::UpdateInfo& info,
         gz::sim::EntityComponentManager& ecm)
 {
+    // Collect the previous step's raytrace before (possibly) launching a new one.
+    FetchAndPublishRaytraceResults();
     if (ShouldRayTrace(info.simTime, info.paused)) {
         UpdateLidarPose(ecm);
         RayTrace(info.simTime);

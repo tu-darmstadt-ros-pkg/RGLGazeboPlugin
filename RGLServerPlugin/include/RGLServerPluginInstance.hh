@@ -71,6 +71,7 @@ private:
     bool ShouldRayTrace(std::chrono::steady_clock::duration sim_time,
                         bool paused);
     void RayTrace(std::chrono::steady_clock::duration sim_time);
+    void FetchAndPublishRaytraceResults();
 
     bool FetchLaserScanResult();
     bool FetchPointCloudResult(rgl_node_t formatNode);
@@ -134,6 +135,11 @@ private:
 
     std::chrono::steady_clock::duration raytraceIntervalTime;
     std::chrono::steady_clock::duration lastRaytraceTime{0};
+
+    // rgl_graph_run is asynchronous (GPU); results are fetched one PreUpdate later so the
+    // raytrace never blocks the serial physics step.
+    bool raytracePending = false;
+    std::chrono::steady_clock::duration pendingRaytraceTime{0};
 
     bool isLidarInitialized = false;
 
