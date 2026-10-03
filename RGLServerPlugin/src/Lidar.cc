@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 #include <limits>
 
 #include <gz/sim/Util.hh>
@@ -33,6 +34,7 @@
 #define PARAM_FILTER_OWN_MODEL_ID "filter_own_model"
 #define PARAM_PUBLISH_TIMESTAMPS_ID "publish_timestamps"
 #define PARAM_CAMERA_INFO_TOPIC_ID "camera_info_topic"
+#define PARAM_NOISE_ID "noise"
 
 namespace rgl
 {
@@ -125,6 +127,13 @@ bool RGLServerPluginInstance::LoadConfiguration(const std::shared_ptr<const sdf:
 
     if (sdf->HasElement(PARAM_PUBLISH_TIMESTAMPS_ID)) {
         publishTimestamps = sdf->Get<bool>(PARAM_PUBLISH_TIMESTAMPS_ID);
+    }
+
+    if (sdf->HasElement(PARAM_NOISE_ID)) {
+        const auto noiseSdf = sdf->FindElement(PARAM_NOISE_ID);
+        noise.distanceStddev = noiseSdf->Get<float>("distance_stddev", 0.0f).first;
+        noise.distanceStddevQuadratic = noiseSdf->Get<float>("distance_stddev_quadratic", 0.0f).first;
+        noise.angularStddev = noiseSdf->Get<float>("angular_stddev", 0.0f).first;
     }
 
     // Check for 2d pattern and get LaserScan parameters
@@ -345,7 +354,7 @@ void RGLServerPluginInstance::FetchAndPublishRaytraceResults()
             gzerr << "Failed to fetch PointCloud result data (sensor frame) from RGL lidar.\n";
             return;
         }
-        pointCloudPublisher.Publish(CreatePointCloudMsg(simTime, frameId));
+        pointCloudPublisher.Publish(CreatePointCloudMsg(simTime, frameId, true));
     }
 
     if (pointCloudWorldPublisher.HasConnections()) {
@@ -353,7 +362,7 @@ void RGLServerPluginInstance::FetchAndPublishRaytraceResults()
             gzerr << "Failed to fetch PointCloud result data (world frame) from RGL lidar.\n";
             return;
         }
-        auto msg = CreatePointCloudMsg(simTime, worldFrameId);
+        auto msg = CreatePointCloudMsg(simTime, worldFrameId, false);
         pointCloudWorldPublisher.Publish(msg);
     }
 }
@@ -409,7 +418,7 @@ gz::msgs::LaserScan RGLServerPluginInstance::CreateLaserScanMsg(std::chrono::ste
     return outMsg;
 }
 
-gz::msgs::PointCloudPacked RGLServerPluginInstance::CreatePointCloudMsg(std::chrono::steady_clock::duration simTime, const std::string& frame)
+gz::msgs::PointCloudPacked RGLServerPluginInstance::CreatePointCloudMsg(std::chrono::steady_clock::duration simTime, const std::string& frame, bool sensorFrame)
 {
     gz::msgs::PointCloudPacked outMsg;
     std::vector<std::pair<std::string, gz::msgs::PointCloudPacked::Field::DataType>> msgFields = {
@@ -446,6 +455,9 @@ gz::msgs::PointCloudPacked RGLServerPluginInstance::CreatePointCloudMsg(std::chr
             }
         }
         memcpy(out + pointCount * msgStep, point, copySize);
+        if (sensorFrame && noise.Active()) {
+            AddCloudNoise(reinterpret_cast<float*>(out + pointCount * msgStep));
+        }
         if (publishTimestamps) {
             memcpy(out + pointCount * msgStep + copySize, &timestamp, sizeof(timestamp));
         }
@@ -456,6 +468,29 @@ gz::msgs::PointCloudPacked RGLServerPluginInstance::CreatePointCloudMsg(std::chr
     outMsg.set_width(pointCount);
     outMsg.set_row_step(pointCount * msgStep);
     return outMsg;
+}
+
+void RGLServerPluginInstance::AddCloudNoise(float* xyz)
+{
+    std::normal_distribution<float> standard;
+    const gz::math::Vector3f point(xyz[0], xyz[1], xyz[2]);
+    const float distance = point.Length();
+    if (distance <= 0.0f) {
+        return;
+    }
+    gz::math::Vector3f direction = point / distance;
+    if (noise.angularStddev > 0.0f) {
+        // Two directions across the ray, tilted by small normal angles.
+        const gz::math::Vector3f helper = std::abs(direction.Z()) < 0.9f ? gz::math::Vector3f::UnitZ : gz::math::Vector3f::UnitX;
+        const gz::math::Vector3f across = direction.Cross(helper).Normalized();
+        const gz::math::Vector3f up = direction.Cross(across);
+        direction += noise.angularStddev * (standard(cloudNoiseGenerator) * across + standard(cloudNoiseGenerator) * up);
+        direction.Normalize();
+    }
+    const float noisy = distance + noise.Stddev(distance) * standard(cloudNoiseGenerator);
+    xyz[0] = noisy * direction.X();
+    xyz[1] = noisy * direction.Y();
+    xyz[2] = noisy * direction.Z();
 }
 
 bool RGLServerPluginInstance::FetchDepthFrame(std::chrono::steady_clock::duration simTime)
@@ -518,9 +553,14 @@ gz::msgs::Image RGLServerPluginInstance::CreateDepthImageMsg(const DepthFrame& f
     std::string* data = outMsg.mutable_data();
     data->resize(frame.distances.size() * sizeof(float));
     float* depth = reinterpret_cast<float*>(data->data());
+    std::normal_distribution<float> standard;
     for (std::size_t i = 0; i < frame.distances.size(); ++i) {
         const bool own = filterOwnModel && frame.entityIds[i] == ownModelId;
-        depth[i] = own ? std::numeric_limits<float>::quiet_NaN() : frame.distances[i] * depthPerDistance[i];
+        float distance = frame.distances[i];
+        if (noise.Active() && std::isfinite(distance)) {
+            distance += noise.Stddev(distance) * standard(depthNoiseGenerator);
+        }
+        depth[i] = own ? std::numeric_limits<float>::quiet_NaN() : distance * depthPerDistance[i];
     }
     return outMsg;
 }

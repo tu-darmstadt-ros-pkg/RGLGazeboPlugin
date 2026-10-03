@@ -163,6 +163,15 @@ Inside the link entity in your model, add a custom sensor:
 
 - **publish_timestamps** - adds a `timestamp` field (float64, nanoseconds of simulation time) to every point (optional, default: false).
 
+- **noise** - distance noise along each ray with standard deviation `distance_stddev + distance_stddev_quadratic * d^2` (metres, `d` the distance), and angular noise of the ray direction with standard deviation `angular_stddev` (radians, point clouds only; a depth image carries distance noise only). All three default to 0 (optional).
+  ```xml
+  <noise>
+      <distance_stddev>0.02</distance_stddev>
+      <distance_stddev_quadratic>0.0</distance_stddev_quadratic>
+      <angular_stddev>0.0026</angular_stddev>
+  </noise>
+  ```
+
 - **camera_info_topic** - topic of the camera info (gz::msgs::CameraInfo) that goes with the depth image of `pattern_camera` (required with it).
 
 - **pattern_\<type\>** - definition of the lidar firing pattern. Each type has different parameters described below.

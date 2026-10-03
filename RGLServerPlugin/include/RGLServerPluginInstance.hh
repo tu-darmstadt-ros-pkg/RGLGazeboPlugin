@@ -32,6 +32,7 @@
 
 #include <condition_variable>
 #include <mutex>
+#include <random>
 #include <stop_token>
 #include <thread>
 
@@ -83,7 +84,8 @@ private:
     bool FetchLaserScanResult();
     bool FetchPointCloudResult(rgl_node_t formatNode);
 
-    gz::msgs::PointCloudPacked CreatePointCloudMsg(std::chrono::steady_clock::duration sim_time, const std::string& frame);
+    // Noise only in the sensor frame, where a point's direction is its ray.
+    gz::msgs::PointCloudPacked CreatePointCloudMsg(std::chrono::steady_clock::duration sim_time, const std::string& frame, bool sensorFrame);
     gz::msgs::LaserScan CreateLaserScanMsg(std::chrono::steady_clock::duration sim_time, const std::string& frame);
     // pattern_camera: one ray per pixel. The simulation thread only copies the
     // per-ray results; a worker thread builds and publishes the image.
@@ -148,6 +150,22 @@ private:
     bool filterOwnModel = false;
     // Add a per-point "timestamp" field (float64, ns of simulation time).
     bool publishTimestamps = false;
+
+    // <noise>: distance noise along each ray with stddev a + b * d^2, and
+    // angular noise of the ray direction (point clouds only).
+    struct Noise
+    {
+        float distanceStddev = 0.0f;           // a, m
+        float distanceStddevQuadratic = 0.0f;  // b, 1/m
+        float angularStddev = 0.0f;            // rad
+        float Stddev(float distance) const { return distanceStddev + distanceStddevQuadratic * distance * distance; }
+        bool Active() const { return distanceStddev > 0.0f || distanceStddevQuadratic > 0.0f || angularStddev > 0.0f; }
+    } noise;
+    // One generator per thread that applies noise: clouds on the simulation
+    // thread, depth images on the publishing thread.
+    std::mt19937 cloudNoiseGenerator{std::random_device{}()};
+    std::mt19937 depthNoiseGenerator{std::random_device{}()};
+    void AddCloudNoise(float* xyz);
     // RGL entity id of the sensor's model; the manager sets each entity's id to its model.
     int32_t ownModelId = -1;
 
