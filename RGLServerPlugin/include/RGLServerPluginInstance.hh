@@ -179,6 +179,7 @@ private:
 
     std::chrono::steady_clock::duration raytraceIntervalTime;
     std::chrono::steady_clock::duration lastRaytraceTime{0};
+    bool raytracePhaseSet = false;
 
     // rgl_graph_run is asynchronous (GPU); results are fetched one PreUpdate later so the
     // raytrace never blocks the serial physics step.

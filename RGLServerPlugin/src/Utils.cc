@@ -12,7 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <exception>
+#include <regex>
+#include <vector>
+
+#include <gz/sim/Util.hh>
+#include <gz/sim/components/CustomSensor.hh>
+#include <gz/sim/components/SystemPluginInfo.hh>
 
 #include "Utils.hh"
 #include "gz/math/Matrix4.hh"
@@ -80,6 +87,56 @@ rgl_mat3x4f IgnPose3dToRglMatrix(
         }
     }
     return rglMatrix;
+}
+
+std::optional<std::chrono::steady_clock::duration> RaytraceInterval(
+        gz::sim::Entity entity,
+        const gz::sim::EntityComponentManager& ecm)
+{
+    if (!ecm.EntityHasComponentType(entity, gz::sim::components::CustomSensor::typeId)) {
+        return std::nullopt;
+    }
+    const auto pluginData = ecm.ComponentData<gz::sim::components::SystemPluginInfo>(entity);
+    if (!pluginData) {
+        return std::nullopt;
+    }
+    static const std::regex updateRateRegex("<update_rate>\\s*([^<\\s]+)\\s*</update_rate>");
+    for (const auto& plugin : pluginData->plugins()) {
+        std::smatch match;
+        const std::string xml = plugin.innerxml();
+        if (plugin.name() != RGL_INSTANCE || !std::regex_search(xml, match, updateRateRegex)) {
+            continue;
+        }
+        try {
+            const float updateRateHz = std::stof(match[1].str());
+            return std::chrono::microseconds(static_cast<int64_t>(1e6 / updateRateHz));
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+    }
+    return std::nullopt;
+}
+
+std::chrono::steady_clock::duration RaytracePhase(
+        gz::sim::Entity sensor,
+        const gz::sim::EntityComponentManager& ecm)
+{
+    const auto interval = RaytraceInterval(sensor, ecm);
+    if (!interval) {
+        return std::chrono::steady_clock::duration::zero();
+    }
+    const gz::sim::Entity model = gz::sim::topLevelModel(sensor, ecm);
+    std::vector<gz::sim::Entity> peers;
+    ecm.Each<gz::sim::components::CustomSensor>(
+        [&](const gz::sim::Entity& entity, const gz::sim::components::CustomSensor*) {
+            if (gz::sim::topLevelModel(entity, ecm) == model && RaytraceInterval(entity, ecm) == interval) {
+                peers.push_back(entity);
+            }
+            return true;
+        });
+    std::sort(peers.begin(), peers.end());
+    const auto rank = std::find(peers.begin(), peers.end(), sensor) - peers.begin();
+    return *interval * rank / static_cast<int64_t>(std::max<std::size_t>(peers.size(), 1));
 }
 
 void ValidateRGLVersion()

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #include <limits>
-#include <regex>
 
 #include <gz/sim/components/CustomSensor.hh>
 #include <gz/sim/components/Link.hh>
@@ -23,7 +22,6 @@
 
 #include "RGLServerPluginManager.hh"
 
-#define RGL_INSTANCE "rgl::RGLServerPluginInstance"
 
 namespace rgl
 {
@@ -52,7 +50,9 @@ bool RGLServerPluginManager::RegisterNewLidarCb(
         if (plugin.name() == RGL_INSTANCE) {
             lidarEntities.insert(entity);
             lidarsWithoutHousing.insert(entity);
-            raytraceSchedules[entity] = {UpdateInterval(plugin.innerxml())};
+            // Without a readable rate the transforms are updated every step.
+            raytraceSchedules[entity] = {RaytraceInterval(entity, ecm).value_or(std::chrono::steady_clock::duration::zero()),
+                                         RaytracePhase(entity, ecm)};
             if (doIgnoreEntitiesInLidarLink) {
                 for (auto descendant: ecm.Descendants(entity)) {
                     entitiesToIgnore.insert(descendant);
@@ -209,22 +209,6 @@ bool RGLServerPluginManager::RaytraceDueNextStep(const gz::sim::UpdateInfo& info
         }
     }
     return due;
-}
-
-std::chrono::steady_clock::duration RGLServerPluginManager::UpdateInterval(const std::string& pluginInnerXml)
-{
-    // The same interval the instance computes from the same parameter.
-    static const std::regex updateRateRegex("<update_rate>\\s*([^<\\s]+)\\s*</update_rate>");
-    std::smatch match;
-    if (!std::regex_search(pluginInnerXml, match, updateRateRegex)) {
-        return std::chrono::steady_clock::duration::zero();
-    }
-    try {
-        const float updateRateHz = std::stof(match[1].str());
-        return std::chrono::microseconds(static_cast<int64_t>(1e6 / updateRateHz));
-    } catch (const std::exception&) {
-        return std::chrono::steady_clock::duration::zero();
-    }
 }
 
 void RGLServerPluginManager::IgnoreLidarHousings(const gz::sim::EntityComponentManager& ecm)

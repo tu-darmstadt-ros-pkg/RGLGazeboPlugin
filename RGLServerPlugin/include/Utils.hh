@@ -19,6 +19,11 @@
 #include <gz/sim/System.hh>
 #include <gz/sim/components/Pose.hh>
 
+#include <chrono>
+#include <optional>
+
+#define RGL_INSTANCE "rgl::RGLServerPluginInstance"
+
 namespace rgl
 {
 
@@ -36,6 +41,19 @@ rgl_mat3x4f FindWorldPoseInRglMatrix(
         const gz::sim::EntityComponentManager& ecm);
 
 rgl_mat3x4f IgnPose3dToRglMatrix(const gz::math::Pose3<double>& pose);
+
+// The raytrace interval of an RGL sensor (a custom sensor running RGL_INSTANCE),
+// from its <update_rate>, as the instance computes it; nullopt for any other entity.
+std::optional<std::chrono::steady_clock::duration> RaytraceInterval(
+        gz::sim::Entity entity,
+        const gz::sim::EntityComponentManager& ecm);
+
+// Where in its interval a sensor raytraces. The RGL sensors of one model with
+// the same interval are spread evenly over it, in entity order, so they never
+// raytrace, and publish, in the same step.
+std::chrono::steady_clock::duration RaytracePhase(
+        gz::sim::Entity sensor,
+        const gz::sim::EntityComponentManager& ecm);
 
 
 // Throws exception when version of RGL library mismatch

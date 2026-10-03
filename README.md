@@ -149,7 +149,7 @@ Inside the link entity in your model, add a custom sensor:
 ### Parameters description:
 - **range** - the minimum and maximum range that the hits will be registered (in meters).
 
-- **update_rate** - the frequency at which the lidar will perform raycasting (in Hz). A raytrace runs on the GPU while the simulation goes on, and its result is published when the next raytrace is due, one update interval later, stamped with the time it was taken.
+- **update_rate** - the frequency at which the lidar will perform raycasting (in Hz). A raytrace runs on the GPU while the simulation goes on, and its result is published when the next raytrace is due, one update interval later, stamped with the time it was taken. Sensors of one model with the same rate spread their raytraces evenly over the interval, in entity order, so they never raytrace in the same step.
 
 -  **topic** - topic on which pointcloud message (gz::msgs::PointCloudPacked) will be published. A second topic with the `/world` postfix will also be created for visualization purposes.
 
