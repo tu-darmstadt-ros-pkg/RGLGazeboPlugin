@@ -12,9 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <limits>
+
 #include <gz/sim/components/CustomSensor.hh>
 #include <gz/sim/components/Link.hh>
+#include <gz/sim/components/Name.hh>
 #include <gz/sim/components/SystemPluginInfo.hh>
+#include <gz/sim/Util.hh>
 
 #include "RGLServerPluginManager.hh"
 
@@ -46,6 +50,7 @@ bool RGLServerPluginManager::RegisterNewLidarCb(
     for (const auto& plugin : plugins) {
         if (plugin.name() == RGL_INSTANCE) {
             lidarEntities.insert(entity);
+            lidarsWithoutHousing.insert(entity);
             if (doIgnoreEntitiesInLidarLink) {
                 for (auto descendant: ecm.Descendants(entity)) {
                     entitiesToIgnore.insert(descendant);
@@ -88,6 +93,7 @@ bool RGLServerPluginManager::UnregisterLidarCb(
         entitiesToIgnore.erase(entityInParentLink);
     }
     lidarEntities.erase(entity);
+    lidarsWithoutHousing.erase(entity);
     return true;
 }
 
@@ -106,7 +112,8 @@ bool RGLServerPluginManager::LoadEntityToRGLCb(
         return true;
     }
     rgl_mesh_t rglMesh;
-    if (!LoadMeshToRGL(&rglMesh, geometry->Data())) {
+    gz::math::AxisAlignedBox bounds;
+    if (!LoadMeshToRGL(&rglMesh, bounds, geometry->Data())) {
         gzerr << "Failed to load mesh to RGL from entity (" << entity << "). Skipping...\n";
         return true;
     }
@@ -114,6 +121,10 @@ bool RGLServerPluginManager::LoadEntityToRGLCb(
     if (!CheckRGL(rgl_entity_create(&rglEntity, nullptr, rglMesh))) {
         gzerr << "Failed to load entity (" << entity << ") to RGL. Skipping...\n";
         return true;
+    }
+    // Hits report the model the visual belongs to (RGL_FIELD_ENTITY_ID_I32).
+    if (!CheckRGL(rgl_entity_set_id(rglEntity, static_cast<int32_t>(gz::sim::topLevelModel(entity, ecm))))) {
+        gzwarn << "Failed to set the model id of entity (" << entity << ") in RGL.\n";
     }
     // Assign a color texture from the visual's material so lidars can output colored point clouds
     // (RGL_FIELD_COLOR_RGBA_U32). Not fatal on failure; such points are colored white.
@@ -125,6 +136,7 @@ bool RGLServerPluginManager::LoadEntityToRGLCb(
         }
     }
     entitiesInRgl.insert({entity, {rglEntity, rglMesh}});
+    entityBounds.insert({entity, bounds});
     return true;
 }
 
@@ -148,6 +160,7 @@ bool RGLServerPluginManager::RemoveEntityFromRGLCb(
         gzerr << "Failed to remove mesh from entity (" << entity << ") in RGL.\n";
     }
     entitiesInRgl.erase(entity);
+    entityBounds.erase(entity);
     return true;
 }
 
@@ -179,6 +192,36 @@ void RGLServerPluginManager::UpdateRGLEntityTransforms(const gz::sim::EntityComp
         if (!CheckRGL(rgl_entity_set_transform(entity.second.first, &rglMatrix))) {
             gzerr << "Failed to update transform for entity (" << entity.first << ").\n";
         }
+    }
+}
+
+void RGLServerPluginManager::IgnoreLidarHousings(const gz::sim::EntityComponentManager& ecm)
+{
+    for (auto lidar = lidarsWithoutHousing.begin(); lidar != lidarsWithoutHousing.end();) {
+        const gz::math::Vector3d origin = FindWorldPose(*lidar, ecm).Pos();
+        gz::sim::Entity housing = gz::sim::kNullEntity;
+        double housingVolume = std::numeric_limits<double>::infinity();
+        for (const auto& [entity, bounds] : entityBounds) {
+            const auto pose = FindWorldPose(entity, ecm);
+            const auto local = pose.Rot().Inverse().RotateVector(origin - pose.Pos());
+            if (bounds.Contains(local) && bounds.Volume() < housingVolume) {
+                housing = entity;
+                housingVolume = bounds.Volume();
+            }
+        }
+        if (housing == gz::sim::kNullEntity) {
+            ++lidar;
+            continue;
+        }
+        if (!CheckRGL(rgl_entity_set_ignored_by_sensor(entitiesInRgl.at(housing).first,
+                                                       static_cast<int32_t>(*lidar)))) {
+            gzerr << "Failed to let lidar (" << *lidar << ") ignore its housing (" << housing << ").\n";
+        } else {
+            const auto name = ecm.Component<gz::sim::components::Name>(housing);
+            gzmsg << "Lidar (" << *lidar << ") ignores its housing '"
+                  << (name ? name->Data() : std::to_string(housing)) << "'.\n";
+        }
+        lidar = lidarsWithoutHousing.erase(lidar);
     }
 }
 

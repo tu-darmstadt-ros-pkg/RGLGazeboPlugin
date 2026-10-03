@@ -229,6 +229,7 @@ void AppendTexCoords(const gz::common::SubMesh& subMesh, std::vector<rgl_vec2f>&
 
 bool RGLServerPluginManager::LoadMeshToRGL(
         rgl_mesh_t* mesh,
+        gz::math::AxisAlignedBox& bounds,
         const sdf::Geometry& data)
 {
     double scaleX = 1;
@@ -271,11 +272,16 @@ bool RGLServerPluginManager::LoadMeshToRGL(
         }
     }
 
+    bounds = gz::math::AxisAlignedBox();
     for (int i = 0; i < vertexCount; ++i) {
+        const gz::math::Vector3d vertex(scaleX * ignVertices[3 * i + 0],
+                                        scaleY * ignVertices[3 * i + 1],
+                                        scaleZ * ignVertices[3 * i + 2]);
+        bounds.Merge(gz::math::AxisAlignedBox(vertex, vertex));
         rglVertices.emplace_back(rgl_vec3f{
-                static_cast<float>(scaleX * ignVertices[3 * i + 0]),
-                static_cast<float>(scaleY * ignVertices[3 * i + 1]),
-                static_cast<float>(scaleZ * ignVertices[3 * i + 2])});
+                static_cast<float>(vertex.X()),
+                static_cast<float>(vertex.Y()),
+                static_cast<float>(vertex.Z())});
     }
 
     bool success = CheckRGL(rgl_mesh_create(mesh, rglVertices.data(), vertexCount, triangles, triangleCount));

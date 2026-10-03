@@ -116,6 +116,12 @@ private:
     bool updateOnPausedSim = false;
     bool publishLaserScan = false;
     bool publishColor = false;
+    // Drop points on the model the sensor belongs to, as a robot's self-filter does.
+    bool filterOwnModel = false;
+    // Add a per-point "timestamp" field (float64, ns of simulation time).
+    bool publishTimestamps = false;
+    // RGL entity id of the sensor's model; the manager sets each entity's id to its model.
+    int32_t ownModelId = -1;
 
     gz::sim::Entity thisLidarEntity;
     gz::transport::Node::Publisher pointCloudPublisher;

@@ -121,6 +121,7 @@ RGLServerPlugin contains two plugins: `RGLServerPluginManager` and `RGLServerPlu
 
 ### Parameters description:
 - **do_ignore_entities_in_lidar_link** - if enabled, all entities attached to the same \<link\> as lidar will be ignored from raycasting. It could be useful when a visual representation of the sensor is added. (optional, default: true) \
+Independently of this option, each lidar ignores its housing: the smallest visual whose bounds enclose the lidar's origin. The rest of the robot then occludes the lidar as on the real robot. \
 *Note: It has been noticed that when the lidar link is chained to another link with a joint component, the entity tree is simplified and the parent link becomes the lidar link. In such case, the whole robot could be ignored from raycasting. Yet to be resolved.*
 
 This is a global plugin and should be included only once per sdf, preferably inside the world entity. RGLServerPluginManager is responsible for synchronizing the scene between Gazebo and GPU (CUDA). At the moment manager handles all primitive geometry types (Box, Capsule, Cylinder, Ellipsoid, Sphere), planes, meshes and submeshes.
@@ -157,6 +158,10 @@ Inside the link entity in your model, add a custom sensor:
 - **update_on_paused_sim** - determines whether the lidar is active when the simulation is paused (optional, default: false).
 
 - **publish_color** - adds an `rgb` field (packed float, PCL/RViz convention) to the point cloud message, colored from the materials of the hit visuals (optional, default: false). The color is resolved per visual: PBR albedo texture of the SDF material, mesh-embedded material texture, or the diffuse color as fallback. Visuals with no material yield white points. Requires a RobotecGPULidar build with `RGL_FIELD_COLOR_RGBA_U32` support. When `pattern_lidar2d` is used, the main topic publishes LaserScan (no color); color applies only to the optional `<topic>/world` PointCloudPacked topic.
+
+- **filter_own_model** - drops points on the model the lidar belongs to, as a robot's self-filter does (optional, default: false). The model still occludes the rays.
+
+- **publish_timestamps** - adds a `timestamp` field (float64, nanoseconds of simulation time) to every point (optional, default: false).
 
 - **pattern_\<type\>** - definition of the lidar firing pattern. Each type has different parameters described below.
 

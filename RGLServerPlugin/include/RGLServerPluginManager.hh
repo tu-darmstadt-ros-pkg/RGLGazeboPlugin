@@ -70,6 +70,12 @@ private:
     // all entities, that the lidar should ignore
     std::unordered_set<gz::sim::Entity> entitiesToIgnore;
 
+    // Mesh bounds of each entity in RGL, in the entity's own frame
+    std::unordered_map<gz::sim::Entity, gz::math::AxisAlignedBox> entityBounds;
+
+    // Lidars whose housing (the visual enclosing their origin) is not found yet
+    std::unordered_set<gz::sim::Entity> lidarsWithoutHousing;
+
     ////////////////////////////// Mesh /////////////////////////////////
 
     gz::common::MeshManager* meshManager{gz::common::MeshManager::Instance()};
@@ -113,6 +119,10 @@ private:
         const gz::sim::components::LaserRetro* laser_retro);
 
     void UpdateRGLEntityTransforms(const gz::sim::EntityComponentManager& ecm);
+
+    // Lets each lidar's rays pass through its housing: the smallest visual whose
+    // bounds enclose the lidar's origin. The rest of its model still occludes.
+    void IgnoreLidarHousings(const gz::sim::EntityComponentManager& ecm);
 
     std::unordered_set<gz::sim::Entity> GetEntitiesInParentLink(
         gz::sim::Entity entity,
@@ -164,7 +174,7 @@ private:
         double& scaleY,
         double& scaleZ);
 
-    bool LoadMeshToRGL(rgl_mesh_t* mesh, const sdf::Geometry& data);
+    bool LoadMeshToRGL(rgl_mesh_t* mesh, gz::math::AxisAlignedBox& bounds, const sdf::Geometry& data);
 
     ////////////////////////////// Color ////////////////////////////////
 

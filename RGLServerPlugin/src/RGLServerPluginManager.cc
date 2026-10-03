@@ -76,6 +76,10 @@ void RGLServerPluginManager::PostUpdate(
                 return RemoveEntityFromRGLCb(entity, visual, geometry);
             });
 
+    if (!lidarsWithoutHousing.empty()) {
+        IgnoreLidarHousings(ecm);
+    }
+
     UpdateRGLEntityTransforms(ecm);
 }
 

@@ -12,7 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <chrono>
 #include <cstdio>
+#include <cstring>
+
+#include <gz/sim/Util.hh>
 
 #include "RGLServerPluginInstance.hh"
 #include "Utils.hh"
@@ -25,6 +29,8 @@
 #define PARAM_FRAME_ID "frame"
 #define PARAM_UPDATE_ON_PAUSED_SIM_ID "update_on_paused_sim"
 #define PARAM_PUBLISH_COLOR_ID "publish_color"
+#define PARAM_FILTER_OWN_MODEL_ID "filter_own_model"
+#define PARAM_PUBLISH_TIMESTAMPS_ID "publish_timestamps"
 
 namespace rgl
 {
@@ -92,6 +98,19 @@ bool RGLServerPluginInstance::LoadConfiguration(const std::shared_ptr<const sdf:
         resultPointCloud.pointSize += sizeof(uint32_t);
     }
 
+    if (sdf->HasElement(PARAM_FILTER_OWN_MODEL_ID)) {
+        filterOwnModel = sdf->Get<bool>(PARAM_FILTER_OWN_MODEL_ID);
+    }
+    // The entity id is last in each point; it is read for filtering and not published.
+    if (filterOwnModel) {
+        resultPointCloud.rglFields.push_back(RGL_FIELD_ENTITY_ID_I32);
+        resultPointCloud.pointSize += sizeof(int32_t);
+    }
+
+    if (sdf->HasElement(PARAM_PUBLISH_TIMESTAMPS_ID)) {
+        publishTimestamps = sdf->Get<bool>(PARAM_PUBLISH_TIMESTAMPS_ID);
+    }
+
     // Check for 2d pattern and get LaserScan parameters
     if (sdf->HasElement("pattern_lidar2d")) {
         gzmsg << "Lidar is 2D, switching to publish LaserScan messages";
@@ -108,6 +127,7 @@ void RGLServerPluginInstance::CreateLidar(gz::sim::Entity entity,
                                           gz::sim::EntityComponentManager& ecm)
 {
     thisLidarEntity = entity;
+    ownModelId = static_cast<int32_t>(gz::sim::topLevelModel(entity, ecm));
 
     rgl_mat3x4f identity = {
         1, 0, 0, 0,
@@ -145,6 +165,12 @@ void RGLServerPluginInstance::CreateLidar(gz::sim::Entity entity,
         !CheckRGL(rgl_node_points_transform(&rglNodeToLidarFrame, &identity))) {
 
         gzerr << "Failed to create RGL nodes when initializing lidar. Disabling plugin.\n";
+        return;
+    }
+
+    // The manager lets this id pass through the lidar's housing.
+    if (!CheckRGL(rgl_node_raytrace_configure_id(rglNodeRaytrace, static_cast<int32_t>(entity)))) {
+        gzerr << "Failed to set the RGL sensor id when initializing lidar. Disabling plugin.\n";
         return;
     }
 
@@ -349,15 +375,42 @@ gz::msgs::PointCloudPacked RGLServerPluginInstance::CreatePointCloudMsg(std::chr
         // of the float-typed "rgb" field convention used by PCL, RViz and ros_gz_bridge.
         msgFields.emplace_back("rgb", gz::msgs::PointCloudPacked::Field::FLOAT32);
     }
+    if (publishTimestamps) {
+        msgFields.emplace_back("timestamp", gz::msgs::PointCloudPacked::Field::FLOAT64);
+    }
     gz::msgs::InitPointCloudPacked(outMsg, frame, false, msgFields);
-    outMsg.mutable_data()->resize(resultPointCloud.hitPointCount * outMsg.point_step());
     *outMsg.mutable_header()->mutable_stamp() = gz::msgs::Convert(simTime);
-    outMsg.set_height(1);
-    outMsg.set_width(resultPointCloud.hitPointCount);
-    outMsg.set_row_step(resultPointCloud.hitPointCount * outMsg.point_step());
 
-    gz::msgs::PointCloudPackedIterator<float> xIter(outMsg, "x");
-    memcpy(&(*xIter), resultPointCloud.data.data(), resultPointCloud.hitPointCount * resultPointCloud.pointSize);
+    // Each RGL point is the published fields up to the timestamp, followed by the
+    // entity id when filtering. All rays are traced at simTime.
+    const std::size_t rglStep = resultPointCloud.pointSize;
+    const std::size_t copySize = rglStep - (filterOwnModel ? sizeof(int32_t) : 0);
+    const std::size_t msgStep = outMsg.point_step();
+    const double timestamp = static_cast<double>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(simTime).count());
+
+    outMsg.mutable_data()->resize(resultPointCloud.hitPointCount * msgStep);
+    char* out = outMsg.mutable_data()->data();
+    std::size_t pointCount = 0;
+    for (int32_t i = 0; i < resultPointCloud.hitPointCount; ++i) {
+        const char* point = resultPointCloud.data.data() + i * rglStep;
+        if (filterOwnModel) {
+            int32_t entityId;
+            memcpy(&entityId, point + copySize, sizeof(entityId));
+            if (entityId == ownModelId) {
+                continue;
+            }
+        }
+        memcpy(out + pointCount * msgStep, point, copySize);
+        if (publishTimestamps) {
+            memcpy(out + pointCount * msgStep + copySize, &timestamp, sizeof(timestamp));
+        }
+        ++pointCount;
+    }
+    outMsg.mutable_data()->resize(pointCount * msgStep);
+    outMsg.set_height(1);
+    outMsg.set_width(pointCount);
+    outMsg.set_row_step(pointCount * msgStep);
     return outMsg;
 }
 
