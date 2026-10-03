@@ -27,6 +27,16 @@
 namespace rgl
 {
 
+// A pinhole camera with square pixels and the principal point in the image centre.
+struct CameraModel
+{
+    int width = 0;
+    int height = 0;
+    double focalLength = 0.0;  // pixels
+    double cx = 0.0;
+    double cy = 0.0;
+};
+
 class LidarPatternLoader
 {
 public:
@@ -34,6 +44,8 @@ public:
 
     static bool Load(const sdf::ElementConstPtr& sdf, std::vector<rgl_mat3x4f>& outPattern,
                      std::size_t& outPatternScanSize);
+    // The camera a <pattern_camera> element describes.
+    static bool LoadCameraModel(const sdf::ElementConstPtr& sdf, CameraModel& outCamera);
 
 private:
     LidarPatternLoader() {};
@@ -47,6 +59,7 @@ private:
     static bool LoadPatternFromPreset(const sdf::ElementConstPtr& sdf, std::vector<rgl_mat3x4f>& outPattern, std::size_t& outPatternScanSize);
     static bool LoadPatternFromPresetPath(const sdf::ElementConstPtr& sdf, std::vector<rgl_mat3x4f>& outPattern, std::size_t& outPatternScanSize);
     static bool LoadPatternFromLidar2d(const sdf::ElementConstPtr& sdf, std::vector<rgl_mat3x4f>& outPattern, std::size_t& outPatternScanSize);
+    static bool LoadPatternFromCamera(const sdf::ElementConstPtr& sdf, std::vector<rgl_mat3x4f>& outPattern, std::size_t& outPatternScanSize);
 
     static rgl_mat3x4f AnglesToRglMat3x4f(const gz::math::Angle& roll,
                                           const gz::math::Angle& pitch,

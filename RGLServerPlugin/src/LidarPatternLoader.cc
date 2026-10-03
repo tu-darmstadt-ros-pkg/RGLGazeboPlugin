@@ -49,6 +49,7 @@ std::map<std::string, LidarPatternLoader::LoadFuncType> LidarPatternLoader::patt
     {"pattern_preset", std::bind(&LidarPatternLoader::LoadPatternFromPreset, _1, _2, _3)},
     {"pattern_preset_path", std::bind(&LidarPatternLoader::LoadPatternFromPresetPath, _1, _2, _3)},
     {"pattern_lidar2d", std::bind(&LidarPatternLoader::LoadPatternFromLidar2d, _1, _2, _3)},
+    {"pattern_camera", std::bind(&LidarPatternLoader::LoadPatternFromCamera, _1, _2, _3)},
 };
 
 bool LidarPatternLoader::Load(const sdf::ElementConstPtr& sdf, std::vector<rgl_mat3x4f>& outPattern,
@@ -297,6 +298,62 @@ bool LidarPatternLoader::LoadPatternFromLidar2d(const sdf::ElementConstPtr& sdf,
 
     outPatternScanSize = outPattern.size();
 
+    return true;
+}
+
+bool LidarPatternLoader::LoadPatternFromCamera(const sdf::ElementConstPtr& sdf, std::vector<rgl_mat3x4f>& outPattern, std::size_t& outPatternScanSize)
+{
+    CameraModel camera;
+    if (!LoadCameraModel(sdf, camera)) {
+        return false;
+    }
+
+    // One ray through the centre of each pixel of a pinhole camera looking
+    // along +x (z up), row by row from the top left, so a ray's index is
+    // its pixel's index in the image.
+    outPattern.clear();
+    outPattern.reserve(camera.width * camera.height);
+    for (int v = 0; v < camera.height; ++v) {
+        for (int u = 0; u < camera.width; ++u) {
+            const gz::math::Vector3d direction(camera.focalLength,
+                                               camera.cx - (u + 0.5),
+                                               camera.cy - (v + 0.5));
+            gz::math::Quaterniond rotation;
+            rotation.SetFrom2Axes(gz::math::Vector3d::UnitZ, direction.Normalized());
+            gz::math::Matrix4d matrix4D(rotation);
+            rgl_mat3x4f ray;
+            for (int i = 0; i < 3; ++i) {
+                for (int j = 0; j < 4; ++j) {
+                    ray.value[i][j] = static_cast<float>(matrix4D(i, j));
+                }
+            }
+            outPattern.push_back(ray);
+        }
+    }
+
+    outPatternScanSize = outPattern.size();
+    return true;
+}
+
+bool LidarPatternLoader::LoadCameraModel(const sdf::ElementConstPtr& sdf, CameraModel& outCamera)
+{
+    for (const char* name : {"width", "height", "horizontal_fov"}) {
+        if (!sdf->HasElement(name)) {
+            gzerr << "Failed to load camera pattern. A '" << name << "' element is required inside, but it is not set.\n";
+            return false;
+        }
+    }
+    outCamera.width = sdf->Get<int>("width");
+    outCamera.height = sdf->Get<int>("height");
+    const double horizontalFov = sdf->Get<double>("horizontal_fov");
+    if (outCamera.width <= 0 || outCamera.height <= 0 || horizontalFov <= 0.0 || horizontalFov >= GZ_PI) {
+        gzerr << "Failed to load camera pattern. Width and height must be positive and the horizontal field of view in (0, pi).\n";
+        return false;
+    }
+    // Square pixels, principal point in the image centre.
+    outCamera.focalLength = 0.5 * outCamera.width / std::tan(0.5 * horizontalFov);
+    outCamera.cx = 0.5 * outCamera.width;
+    outCamera.cy = 0.5 * outCamera.height;
     return true;
 }
 

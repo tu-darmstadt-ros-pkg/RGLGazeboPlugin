@@ -28,6 +28,8 @@
 
 #include <gz/transport/Node.hh>
 
+#include <chrono>
+
 namespace rgl
 {
 
@@ -76,6 +78,17 @@ private:
     // Lidars whose housing (the visual enclosing their origin) is not found yet
     std::unordered_set<gz::sim::Entity> lidarsWithoutHousing;
 
+    // Each lidar's raytrace schedule, by the rule its instance follows: a
+    // raytrace when sim time reaches the last one plus the update interval.
+    // Updating an entity's transform waits for every running raytrace, so
+    // the transforms are updated only on the step before a raytrace.
+    struct RaytraceSchedule
+    {
+        std::chrono::steady_clock::duration interval{0};  // zero: every step
+        std::chrono::steady_clock::duration last{0};
+    };
+    std::unordered_map<gz::sim::Entity, RaytraceSchedule> raytraceSchedules;
+
     ////////////////////////////// Mesh /////////////////////////////////
 
     gz::common::MeshManager* meshManager{gz::common::MeshManager::Instance()};
@@ -119,6 +132,13 @@ private:
         const gz::sim::components::LaserRetro* laser_retro);
 
     void UpdateRGLEntityTransforms(const gz::sim::EntityComponentManager& ecm);
+
+    // Whether a lidar raytraces in the next step, which then sees the
+    // transforms this step leaves.
+    bool RaytraceDueNextStep(const gz::sim::UpdateInfo& info);
+
+    // A lidar's update interval, from its plugin's <update_rate>.
+    static std::chrono::steady_clock::duration UpdateInterval(const std::string& pluginInnerXml);
 
     // Lets each lidar's rays pass through its housing: the smallest visual whose
     // bounds enclose the lidar's origin. The rest of its model still occludes.

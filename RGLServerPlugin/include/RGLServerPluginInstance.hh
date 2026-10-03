@@ -27,6 +27,13 @@
 
 #include <gz/transport/Node.hh>
 #include <gz/msgs/details/laserscan.pb.h>
+#include <gz/msgs/camera_info.pb.h>
+#include <gz/msgs/image.pb.h>
+
+#include <condition_variable>
+#include <mutex>
+#include <stop_token>
+#include <thread>
 
 
 namespace rgl
@@ -78,6 +85,18 @@ private:
 
     gz::msgs::PointCloudPacked CreatePointCloudMsg(std::chrono::steady_clock::duration sim_time, const std::string& frame);
     gz::msgs::LaserScan CreateLaserScanMsg(std::chrono::steady_clock::duration sim_time, const std::string& frame);
+    // pattern_camera: one ray per pixel. The simulation thread only copies the
+    // per-ray results; a worker thread builds and publishes the image.
+    struct DepthFrame
+    {
+        std::chrono::steady_clock::duration simTime{0};
+        std::vector<float> distances{};
+        std::vector<int32_t> entityIds{};
+    };
+    bool FetchDepthFrame(std::chrono::steady_clock::duration sim_time);
+    void PublishDepthFrames(std::stop_token stop);
+    gz::msgs::Image CreateDepthImageMsg(const DepthFrame& frame);
+    gz::msgs::CameraInfo CreateCameraInfoMsg(std::chrono::steady_clock::duration sim_time);
 
     void DestroyLidar();
 
@@ -113,8 +132,17 @@ private:
         };
     } resultLaserScan{};
 
+    // Byte offsets in an RGL point: the published fields come first, then the
+    // entity id (filter_own_model).
+    std::size_t publishedPointSize = 0;
+    std::size_t entityIdOffset = 0;
+
     bool updateOnPausedSim = false;
     bool publishLaserScan = false;
+    // pattern_camera: publish a depth image and its camera info instead of a point cloud.
+    bool publishDepthImage = false;
+    CameraModel camera;
+    std::string cameraInfoTopicName;
     bool publishColor = false;
     // Drop points on the model the sensor belongs to, as a robot's self-filter does.
     bool filterOwnModel = false;
@@ -126,6 +154,8 @@ private:
     gz::sim::Entity thisLidarEntity;
     gz::transport::Node::Publisher pointCloudPublisher;
     gz::transport::Node::Publisher laserScanPublisher;
+    gz::transport::Node::Publisher depthImagePublisher;
+    gz::transport::Node::Publisher cameraInfoPublisher;
     gz::transport::Node::Publisher pointCloudWorldPublisher;
     gz::transport::Node gazeboNode;
 
@@ -138,6 +168,14 @@ private:
     rgl_node_t rglNodeFormatPointCloudSensor = nullptr;
     rgl_node_t rglNodeFormatPointCloudWorld = nullptr;
     rgl_node_t rglNodeToLidarFrame = nullptr;
+    rgl_node_t rglNodeYieldDepth = nullptr;
+
+    // Depth along the optical axis per metre of a pixel's ray.
+    std::vector<float> depthPerDistance;
+    DepthFrame pendingDepthFrame;
+    bool depthFramePending = false;
+    std::mutex depthMutex;
+    std::condition_variable_any depthCondition;
 
     std::chrono::steady_clock::duration raytraceIntervalTime;
     std::chrono::steady_clock::duration lastRaytraceTime{0};
@@ -156,6 +194,9 @@ private:
 
     const std::string worldFrameId = "world";
     const std::string worldTopicPostfix = "/world";
+
+    // Last, so it is stopped and joined before the members it uses go.
+    std::jthread depthPublisherThread;
 };
 
 }  // namespace rgl

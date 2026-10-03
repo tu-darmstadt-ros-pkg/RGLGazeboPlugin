@@ -149,7 +149,7 @@ Inside the link entity in your model, add a custom sensor:
 ### Parameters description:
 - **range** - the minimum and maximum range that the hits will be registered (in meters).
 
-- **update_rate** - the frequency at which the lidar will perform raycasting (in Hz).
+- **update_rate** - the frequency at which the lidar will perform raycasting (in Hz). A raytrace runs on the GPU while the simulation goes on, and its result is published when the next raytrace is due, one update interval later, stamped with the time it was taken.
 
 -  **topic** - topic on which pointcloud message (gz::msgs::PointCloudPacked) will be published. A second topic with the `/world` postfix will also be created for visualization purposes.
 
@@ -162,6 +162,8 @@ Inside the link entity in your model, add a custom sensor:
 - **filter_own_model** - drops points on the model the lidar belongs to, as a robot's self-filter does (optional, default: false). The model still occludes the rays.
 
 - **publish_timestamps** - adds a `timestamp` field (float64, nanoseconds of simulation time) to every point (optional, default: false).
+
+- **camera_info_topic** - topic of the camera info (gz::msgs::CameraInfo) that goes with the depth image of `pattern_camera` (required with it).
 
 - **pattern_\<type\>** - definition of the lidar firing pattern. Each type has different parameters described below.
 
@@ -249,6 +251,22 @@ Inside the link entity in your model, add a custom sensor:
           <max_angle>3.14159</max_angle>
       </horizontal>
   </pattern_lidar2d>
+  ```
+
+- **pattern_camera**\
+  A pinhole depth camera looking along the sensor's +x (z up): one ray
+  through the centre of each pixel, square pixels, principal point in the
+  image centre. Publishes a depth image (gz::msgs::Image, `R_FLOAT32`, the
+  depth along the optical axis in metres, NaN where nothing is hit) on
+  `topic` and its camera info on `camera_info_topic`, both with `frame` as
+  frame id, which should name the optical frame (z along the view, x right,
+  y down). With `filter_own_model`, pixels on the own model are NaN.
+  ```xml
+  <pattern_camera>
+      <width>640</width>
+      <height>400</height>
+      <horizontal_fov>1.185</horizontal_fov>
+  </pattern_camera>
   ```
 
 ## How to visualize in Gazebo

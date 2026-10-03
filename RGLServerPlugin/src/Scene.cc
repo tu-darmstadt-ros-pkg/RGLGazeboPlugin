@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <limits>
+#include <regex>
 
 #include <gz/sim/components/CustomSensor.hh>
 #include <gz/sim/components/Link.hh>
@@ -51,6 +52,7 @@ bool RGLServerPluginManager::RegisterNewLidarCb(
         if (plugin.name() == RGL_INSTANCE) {
             lidarEntities.insert(entity);
             lidarsWithoutHousing.insert(entity);
+            raytraceSchedules[entity] = {UpdateInterval(plugin.innerxml())};
             if (doIgnoreEntitiesInLidarLink) {
                 for (auto descendant: ecm.Descendants(entity)) {
                     entitiesToIgnore.insert(descendant);
@@ -94,6 +96,7 @@ bool RGLServerPluginManager::UnregisterLidarCb(
     }
     lidarEntities.erase(entity);
     lidarsWithoutHousing.erase(entity);
+    raytraceSchedules.erase(entity);
     return true;
 }
 
@@ -195,13 +198,48 @@ void RGLServerPluginManager::UpdateRGLEntityTransforms(const gz::sim::EntityComp
     }
 }
 
+bool RGLServerPluginManager::RaytraceDueNextStep(const gz::sim::UpdateInfo& info)
+{
+    const auto next = info.simTime + info.dt;
+    bool due = false;
+    for (auto& [lidar, schedule] : raytraceSchedules) {
+        if (next >= schedule.last + schedule.interval) {
+            schedule.last = next;
+            due = true;
+        }
+    }
+    return due;
+}
+
+std::chrono::steady_clock::duration RGLServerPluginManager::UpdateInterval(const std::string& pluginInnerXml)
+{
+    // The same interval the instance computes from the same parameter.
+    static const std::regex updateRateRegex("<update_rate>\\s*([^<\\s]+)\\s*</update_rate>");
+    std::smatch match;
+    if (!std::regex_search(pluginInnerXml, match, updateRateRegex)) {
+        return std::chrono::steady_clock::duration::zero();
+    }
+    try {
+        const float updateRateHz = std::stof(match[1].str());
+        return std::chrono::microseconds(static_cast<int64_t>(1e6 / updateRateHz));
+    } catch (const std::exception&) {
+        return std::chrono::steady_clock::duration::zero();
+    }
+}
+
 void RGLServerPluginManager::IgnoreLidarHousings(const gz::sim::EntityComponentManager& ecm)
 {
     for (auto lidar = lidarsWithoutHousing.begin(); lidar != lidarsWithoutHousing.end();) {
         const gz::math::Vector3d origin = FindWorldPose(*lidar, ecm).Pos();
+        // A housing is part of the sensor's own model; a visual of the world
+        // around it may enclose the origin too, and must stay visible.
+        const gz::sim::Entity ownModel = gz::sim::topLevelModel(*lidar, ecm);
         gz::sim::Entity housing = gz::sim::kNullEntity;
         double housingVolume = std::numeric_limits<double>::infinity();
         for (const auto& [entity, bounds] : entityBounds) {
+            if (gz::sim::topLevelModel(entity, ecm) != ownModel) {
+                continue;
+            }
             const auto pose = FindWorldPose(entity, ecm);
             const auto local = pose.Rot().Inverse().RotateVector(origin - pose.Pos());
             if (bounds.Contains(local) && bounds.Volume() < housingVolume) {

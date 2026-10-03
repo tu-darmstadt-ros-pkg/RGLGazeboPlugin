@@ -45,9 +45,10 @@ void RGLServerPluginInstance::PreUpdate(
         const gz::sim::UpdateInfo& info,
         gz::sim::EntityComponentManager& ecm)
 {
-    // Collect the previous step's raytrace before (possibly) launching a new one.
-    FetchAndPublishRaytraceResults();
+    // The previous raytrace is collected only when the next one is due, a
+    // whole update interval later, so the simulation never waits for the GPU.
     if (ShouldRayTrace(info.simTime, info.paused)) {
+        FetchAndPublishRaytraceResults();
         UpdateLidarPose(ecm);
         RayTrace(info.simTime);
     }

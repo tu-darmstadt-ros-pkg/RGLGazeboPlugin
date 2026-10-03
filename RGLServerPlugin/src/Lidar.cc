@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 #include <gz/sim/Util.hh>
 
@@ -31,6 +32,7 @@
 #define PARAM_PUBLISH_COLOR_ID "publish_color"
 #define PARAM_FILTER_OWN_MODEL_ID "filter_own_model"
 #define PARAM_PUBLISH_TIMESTAMPS_ID "publish_timestamps"
+#define PARAM_CAMERA_INFO_TOPIC_ID "camera_info_topic"
 
 namespace rgl
 {
@@ -97,14 +99,28 @@ bool RGLServerPluginInstance::LoadConfiguration(const std::shared_ptr<const sdf:
         resultPointCloud.rglFields.push_back(RGL_FIELD_COLOR_RGBA_U32);
         resultPointCloud.pointSize += sizeof(uint32_t);
     }
+    publishedPointSize = resultPointCloud.pointSize;
 
     if (sdf->HasElement(PARAM_FILTER_OWN_MODEL_ID)) {
         filterOwnModel = sdf->Get<bool>(PARAM_FILTER_OWN_MODEL_ID);
     }
-    // The entity id is last in each point; it is read for filtering and not published.
+    // The entity id follows the published fields; it is read for filtering and not published.
+    entityIdOffset = resultPointCloud.pointSize;
     if (filterOwnModel) {
         resultPointCloud.rglFields.push_back(RGL_FIELD_ENTITY_ID_I32);
         resultPointCloud.pointSize += sizeof(int32_t);
+    }
+
+    if (sdf->HasElement("pattern_camera")) {
+        if (!sdf->HasElement(PARAM_CAMERA_INFO_TOPIC_ID)) {
+            gzerr << "No '" << PARAM_CAMERA_INFO_TOPIC_ID << "' parameter specified for the RGL camera. Disabling plugin.\n";
+            return false;
+        }
+        if (!LidarPatternLoader::LoadCameraModel(sdf->FindElement("pattern_camera"), camera)) {
+            return false;
+        }
+        publishDepthImage = true;
+        cameraInfoTopicName = sdf->Get<std::string>(PARAM_CAMERA_INFO_TOPIC_ID);
     }
 
     if (sdf->HasElement(PARAM_PUBLISH_TIMESTAMPS_ID)) {
@@ -192,6 +208,31 @@ void RGLServerPluginInstance::CreateLidar(gz::sim::Entity entity,
         }
         gzmsg << "Start publishing LaserScan messages on topic '" << topicName << "'\n";
         laserScanPublisher = gazeboNode.Advertise<gz::msgs::LaserScan>(topicName);
+    } else if (publishDepthImage) {
+        // Every ray's distance in pixel order, NaN where nothing was hit.
+        std::vector<rgl_field_t> fields = {RGL_FIELD_DISTANCE_F32};
+        if (filterOwnModel) {
+            fields.push_back(RGL_FIELD_ENTITY_ID_I32);
+        }
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        if (!CheckRGL(rgl_node_points_yield(&rglNodeYieldDepth, fields.data(), fields.size())) ||
+            !CheckRGL(rgl_node_raytrace_configure_non_hits(rglNodeRaytrace, nan, nan)) ||
+            !CheckRGL(rgl_graph_node_add_child(rglNodeRaytrace, rglNodeYieldDepth)) ||
+            !CheckRGL(rgl_graph_node_set_priority(rglNodeYieldDepth, 1))) {
+            gzerr << "Failed to connect RGL nodes when initializing camera. Disabling plugin.\n";
+            return;
+        }
+        // A ray's direction is the third column of its rotation; its x is the
+        // cosine to the optical axis.
+        depthPerDistance.resize(lidarPatternSampleSize);
+        for (std::size_t i = 0; i < lidarPatternSampleSize; ++i) {
+            depthPerDistance[i] = lidarPattern[i].value[0][2];
+        }
+        gzmsg << "Start publishing depth Image messages on topic '" << topicName
+              << "' and CameraInfo on '" << cameraInfoTopicName << "'\n";
+        depthImagePublisher = gazeboNode.Advertise<gz::msgs::Image>(topicName);
+        cameraInfoPublisher = gazeboNode.Advertise<gz::msgs::CameraInfo>(cameraInfoTopicName);
+        depthPublisherThread = std::jthread([this](std::stop_token stop) { PublishDepthFrames(stop); });
     } else {  // publish PointCloud
         if(!CheckRGL(rgl_graph_node_add_child(rglNodeCompact, rglNodeToLidarFrame)) ||
            !CheckRGL(rgl_graph_node_add_child(rglNodeToLidarFrame, rglNodeFormatPointCloudSensor)) ||
@@ -294,13 +335,17 @@ void RGLServerPluginInstance::FetchAndPublishRaytraceResults()
         }
         auto msg = CreateLaserScanMsg(simTime, frameId);
         laserScanPublisher.Publish(msg);
+    } else if (publishDepthImage) {
+        if (!FetchDepthFrame(simTime)) {
+            gzerr << "Failed to fetch depth result data from RGL camera.\n";
+            return;
+        }
     } else {  // publish PointCloud
         if (!FetchPointCloudResult(rglNodeFormatPointCloudSensor)) {
             gzerr << "Failed to fetch PointCloud result data (sensor frame) from RGL lidar.\n";
             return;
         }
-        auto msg = CreatePointCloudMsg(simTime, frameId);
-        pointCloudPublisher.Publish(msg);
+        pointCloudPublisher.Publish(CreatePointCloudMsg(simTime, frameId));
     }
 
     if (pointCloudWorldPublisher.HasConnections()) {
@@ -381,10 +426,9 @@ gz::msgs::PointCloudPacked RGLServerPluginInstance::CreatePointCloudMsg(std::chr
     gz::msgs::InitPointCloudPacked(outMsg, frame, false, msgFields);
     *outMsg.mutable_header()->mutable_stamp() = gz::msgs::Convert(simTime);
 
-    // Each RGL point is the published fields up to the timestamp, followed by the
-    // entity id when filtering. All rays are traced at simTime.
+    // All rays are traced at simTime.
     const std::size_t rglStep = resultPointCloud.pointSize;
-    const std::size_t copySize = rglStep - (filterOwnModel ? sizeof(int32_t) : 0);
+    const std::size_t copySize = publishedPointSize;
     const std::size_t msgStep = outMsg.point_step();
     const double timestamp = static_cast<double>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(simTime).count());
@@ -396,7 +440,7 @@ gz::msgs::PointCloudPacked RGLServerPluginInstance::CreatePointCloudMsg(std::chr
         const char* point = resultPointCloud.data.data() + i * rglStep;
         if (filterOwnModel) {
             int32_t entityId;
-            memcpy(&entityId, point + copySize, sizeof(entityId));
+            memcpy(&entityId, point + entityIdOffset, sizeof(entityId));
             if (entityId == ownModelId) {
                 continue;
             }
@@ -414,21 +458,118 @@ gz::msgs::PointCloudPacked RGLServerPluginInstance::CreatePointCloudMsg(std::chr
     return outMsg;
 }
 
+bool RGLServerPluginInstance::FetchDepthFrame(std::chrono::steady_clock::duration simTime)
+{
+    std::unique_lock lock(depthMutex);
+    // The worker takes a frame long before the next is due; this rarely waits.
+    depthCondition.wait(lock, [this] { return !depthFramePending; });
+    pendingDepthFrame.simTime = simTime;
+    pendingDepthFrame.distances.resize(lidarPatternSampleSize);
+    if (!CheckRGL(rgl_graph_get_result_data(rglNodeYieldDepth, RGL_FIELD_DISTANCE_F32,
+                                            pendingDepthFrame.distances.data()))) {
+        return false;
+    }
+    if (filterOwnModel) {
+        pendingDepthFrame.entityIds.resize(lidarPatternSampleSize);
+        if (!CheckRGL(rgl_graph_get_result_data(rglNodeYieldDepth, RGL_FIELD_ENTITY_ID_I32,
+                                                pendingDepthFrame.entityIds.data()))) {
+            return false;
+        }
+    }
+    depthFramePending = true;
+    lock.unlock();
+    depthCondition.notify_all();
+    return true;
+}
+
+void RGLServerPluginInstance::PublishDepthFrames(std::stop_token stop)
+{
+    DepthFrame frame;
+    while (true) {
+        {
+            std::unique_lock lock(depthMutex);
+            if (!depthCondition.wait(lock, stop, [this] { return depthFramePending; })) {
+                return;
+            }
+            // The fetch fills the buffers this frame held before.
+            std::swap(frame, pendingDepthFrame);
+            depthFramePending = false;
+        }
+        depthCondition.notify_all();
+        depthImagePublisher.Publish(CreateDepthImageMsg(frame));
+        cameraInfoPublisher.Publish(CreateCameraInfoMsg(frame.simTime));
+    }
+}
+
+gz::msgs::Image RGLServerPluginInstance::CreateDepthImageMsg(const DepthFrame& frame)
+{
+    gz::msgs::Image outMsg;
+    *outMsg.mutable_header()->mutable_stamp() = gz::msgs::Convert(frame.simTime);
+    auto frameData = outMsg.mutable_header()->add_data();
+    frameData->set_key("frame_id");
+    frameData->add_value(frameId);
+    outMsg.set_width(camera.width);
+    outMsg.set_height(camera.height);
+    outMsg.set_pixel_format_type(gz::msgs::PixelFormatType::R_FLOAT32);
+    outMsg.set_step(camera.width * sizeof(float));
+
+    // Depth along the optical axis in metres; NaN where nothing was hit and,
+    // with filter_own_model, where the hit is on the own model.
+    std::string* data = outMsg.mutable_data();
+    data->resize(frame.distances.size() * sizeof(float));
+    float* depth = reinterpret_cast<float*>(data->data());
+    for (std::size_t i = 0; i < frame.distances.size(); ++i) {
+        const bool own = filterOwnModel && frame.entityIds[i] == ownModelId;
+        depth[i] = own ? std::numeric_limits<float>::quiet_NaN() : frame.distances[i] * depthPerDistance[i];
+    }
+    return outMsg;
+}
+
+gz::msgs::CameraInfo RGLServerPluginInstance::CreateCameraInfoMsg(std::chrono::steady_clock::duration simTime)
+{
+    gz::msgs::CameraInfo outMsg;
+    *outMsg.mutable_header()->mutable_stamp() = gz::msgs::Convert(simTime);
+    auto frame = outMsg.mutable_header()->add_data();
+    frame->set_key("frame_id");
+    frame->add_value(frameId);
+    outMsg.set_width(camera.width);
+    outMsg.set_height(camera.height);
+
+    const double f = camera.focalLength;
+    outMsg.mutable_distortion()->set_model(gz::msgs::CameraInfo::Distortion::PLUMB_BOB);
+    for (int i = 0; i < 5; ++i) {
+        outMsg.mutable_distortion()->add_k(0.0);
+    }
+    for (double k : {f, 0.0, camera.cx, 0.0, f, camera.cy, 0.0, 0.0, 1.0}) {
+        outMsg.mutable_intrinsics()->add_k(k);
+    }
+    for (double p : {f, 0.0, camera.cx, 0.0, 0.0, f, camera.cy, 0.0, 0.0, 0.0, 1.0, 0.0}) {
+        outMsg.mutable_projection()->add_p(p);
+    }
+    for (double r : {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}) {
+        outMsg.add_rectification_matrix(r);
+    }
+    return outMsg;
+}
+
 void RGLServerPluginInstance::DestroyLidar()
 {
     if (!isLidarInitialized) {
         return;
     }
 
+    if (depthPublisherThread.joinable()) {
+        depthPublisherThread.request_stop();
+        depthPublisherThread.join();
+    }
     if (!CheckRGL(rgl_graph_destroy(rglNodeRaytrace))) {
         gzerr << "Failed to destroy RGL lidar.\n";
     }
     // Reset publishers
-    if (!publishLaserScan) {
-        pointCloudPublisher = gz::transport::Node::Publisher();
-    } else {
-        laserScanPublisher = gz::transport::Node::Publisher();
-    }
+    pointCloudPublisher = gz::transport::Node::Publisher();
+    laserScanPublisher = gz::transport::Node::Publisher();
+    depthImagePublisher = gz::transport::Node::Publisher();
+    cameraInfoPublisher = gz::transport::Node::Publisher();
     pointCloudWorldPublisher = gz::transport::Node::Publisher();
     isLidarInitialized = false;
 }

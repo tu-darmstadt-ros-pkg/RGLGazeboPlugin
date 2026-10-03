@@ -80,7 +80,10 @@ void RGLServerPluginManager::PostUpdate(
         IgnoreLidarHousings(ecm);
     }
 
-    UpdateRGLEntityTransforms(ecm);
+    // While paused, entities may still be moved by hand.
+    if (info.paused || RaytraceDueNextStep(info)) {
+        UpdateRGLEntityTransforms(ecm);
+    }
 }
 
 }  // namespace rgl
