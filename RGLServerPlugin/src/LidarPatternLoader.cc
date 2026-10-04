@@ -315,9 +315,7 @@ bool LidarPatternLoader::LoadPatternFromCamera(const sdf::ElementConstPtr& sdf, 
     outPattern.reserve(camera.width * camera.height);
     for (int v = 0; v < camera.height; ++v) {
         for (int u = 0; u < camera.width; ++u) {
-            const gz::math::Vector3d direction(camera.focalLength,
-                                               camera.cx - (u + 0.5),
-                                               camera.cy - (v + 0.5));
+            const gz::math::Vector3d direction(camera.focalLength, camera.cx - u, camera.cy - v);
             gz::math::Quaterniond rotation;
             rotation.SetFrom2Axes(gz::math::Vector3d::UnitZ, direction.Normalized());
             gz::math::Matrix4d matrix4D(rotation);
@@ -350,10 +348,11 @@ bool LidarPatternLoader::LoadCameraModel(const sdf::ElementConstPtr& sdf, Camera
         gzerr << "Failed to load camera pattern. Width and height must be positive and the horizontal field of view in (0, pi).\n";
         return false;
     }
-    // Square pixels, principal point in the image centre.
+    // Square pixels, principal point in the image centre. Pixel centres lie at
+    // integer coordinates (as in CameraInfo), so the centre is at (w - 1) / 2.
     outCamera.focalLength = 0.5 * outCamera.width / std::tan(0.5 * horizontalFov);
-    outCamera.cx = 0.5 * outCamera.width;
-    outCamera.cy = 0.5 * outCamera.height;
+    outCamera.cx = 0.5 * (outCamera.width - 1);
+    outCamera.cy = 0.5 * (outCamera.height - 1);
     return true;
 }
 
