@@ -38,6 +38,7 @@
 #define PARAM_COLOR_TOPIC_ID "color_topic"
 #define PARAM_POINTS_TOPIC_ID "points_topic"
 #define PARAM_NOISE_ID "noise"
+#define PARAM_STEREO_OCCLUSION_ID "stereo_occlusion"
 
 namespace rgl
 {
@@ -151,7 +152,27 @@ bool RGLServerPluginInstance::LoadConfiguration(const std::shared_ptr<const sdf:
         const auto noiseSdf = sdf->FindElement(PARAM_NOISE_ID);
         noise.distanceStddev = noiseSdf->Get<float>("distance_stddev", 0.0f).first;
         noise.distanceStddevQuadratic = noiseSdf->Get<float>("distance_stddev_quadratic", 0.0f).first;
+        noise.maxIncidenceAngle = noiseSdf->Get<float>("max_incidence_angle", noise.maxIncidenceAngle).first;
         noise.angularStddev = noiseSdf->Get<float>("angular_stddev", 0.0f).first;
+        if (!(noise.maxIncidenceAngle > 0.0f && noise.maxIncidenceAngle <= static_cast<float>(M_PI_2))) {
+            gzerr << "'max_incidence_angle' must be in (0, pi/2]. Disabling plugin.\n";
+            return false;
+        }
+    }
+
+    if (sdf->HasElement(PARAM_STEREO_OCCLUSION_ID)) {
+        if (!publishDepthImage) {
+            gzerr << "'" << PARAM_STEREO_OCCLUSION_ID << "' requires 'pattern_camera'. Disabling plugin.\n";
+            return false;
+        }
+        const auto stereoSdf = sdf->FindElement(PARAM_STEREO_OCCLUSION_ID);
+        stereoOcclusion.active = true;
+        stereoOcclusion.baseline = stereoSdf->Get<float>("baseline", 0.0f).first;
+        stereoOcclusion.matchingBand = stereoSdf->Get<int>("matching_band", 0).first;
+        if (stereoOcclusion.baseline == 0.0f || stereoOcclusion.matchingBand < 0) {
+            gzerr << "'" << PARAM_STEREO_OCCLUSION_ID << "' needs a nonzero 'baseline' and a 'matching_band' >= 0. Disabling plugin.\n";
+            return false;
+        }
     }
 
     // Check for 2d pattern and get LaserScan parameters
@@ -222,10 +243,44 @@ void RGLServerPluginInstance::CreateLidar(gz::sim::Entity entity,
         return;
     }
 
+    // The sensor model runs on the GPU: the ray direction noise before the
+    // raytrace, the stereo occlusion and the distance noise on its result.
+    rgl_node_t poseInput = rglNodeSetRange;
+    if (noise.angularStddev > 0.0f) {
+        if (!CheckRGL(rgl_node_gaussian_noise_ray_direction(&rglNodeRayNoise, noise.angularStddev)) ||
+            !CheckRGL(rgl_graph_node_add_child(rglNodeSetRange, rglNodeRayNoise))) {
+            gzerr << "Failed to create the RGL ray direction noise. Disabling plugin.\n";
+            return;
+        }
+        poseInput = rglNodeRayNoise;
+    }
+    rgl_node_t measured = rglNodeRaytrace;
+    if (stereoOcclusion.active) {
+        // The camera looks along the sensor's +x; its columns run towards -y.
+        const rgl_vec3f opticalAxis = {1.0f, 0.0f, 0.0f};
+        if (!CheckRGL(rgl_node_points_stereo_occlusion(&rglNodeStereoOcclusion, camera.width,
+                                                       static_cast<float>(camera.focalLength), stereoOcclusion.baseline,
+                                                       &opticalAxis, stereoOcclusion.matchingBand)) ||
+            !CheckRGL(rgl_graph_node_add_child(measured, rglNodeStereoOcclusion))) {
+            gzerr << "Failed to create the RGL stereo occlusion. Disabling plugin.\n";
+            return;
+        }
+        measured = rglNodeStereoOcclusion;
+    }
+    if (noise.DistanceActive()) {
+        if (!CheckRGL(rgl_node_gaussian_noise_distance(&rglNodeDistanceNoise, 0.0f, noise.distanceStddev, 0.0f,
+                                                       noise.distanceStddevQuadratic, noise.maxIncidenceAngle)) ||
+            !CheckRGL(rgl_graph_node_add_child(measured, rglNodeDistanceNoise))) {
+            gzerr << "Failed to create the RGL distance noise. Disabling plugin.\n";
+            return;
+        }
+        measured = rglNodeDistanceNoise;
+    }
+
     if (!CheckRGL(rgl_graph_node_add_child(rglNodesUseRays.front(), rglNodeSetRange)) ||
-        !CheckRGL(rgl_graph_node_add_child(rglNodeSetRange, rglNodeLidarPose)) ||
+        !CheckRGL(rgl_graph_node_add_child(poseInput, rglNodeLidarPose)) ||
         !CheckRGL(rgl_graph_node_add_child(rglNodeLidarPose, rglNodeRaytrace)) ||
-        !CheckRGL(rgl_graph_node_add_child(rglNodeRaytrace, rglNodeCompact)) ||
+        !CheckRGL(rgl_graph_node_add_child(measured, rglNodeCompact)) ||
         !CheckRGL(rgl_graph_node_add_child(rglNodeCompact, rglNodeFormatPointCloudWorld))) {
 
         gzerr << "Failed to connect RGL nodes when initializing lidar. Disabling plugin.\n";
@@ -233,7 +288,7 @@ void RGLServerPluginInstance::CreateLidar(gz::sim::Entity entity,
     }
 
     if (publishLaserScan) {
-        if(!CheckRGL(rgl_graph_node_add_child(rglNodeRaytrace, rglNodeYieldLaserScan)) ||
+        if(!CheckRGL(rgl_graph_node_add_child(measured, rglNodeYieldLaserScan)) ||
            // Optimization: rglNodeYieldLaserScan should be prioritized because it will be requested first
            !CheckRGL(rgl_graph_node_set_priority(rglNodeYieldLaserScan, 1))) {
             gzerr << "Failed to connect RGL nodes when initializing lidar. Disabling plugin.\n";
@@ -252,7 +307,7 @@ void RGLServerPluginInstance::CreateLidar(gz::sim::Entity entity,
         const float nan = std::numeric_limits<float>::quiet_NaN();
         if (!CheckRGL(rgl_node_points_yield(&rglNodeYieldCamera, fields.data(), fields.size())) ||
             !CheckRGL(rgl_node_raytrace_configure_non_hits(rglNodeRaytrace, nan, nan)) ||
-            !CheckRGL(rgl_graph_node_add_child(rglNodeRaytrace, rglNodeYieldCamera)) ||
+            !CheckRGL(rgl_graph_node_add_child(measured, rglNodeYieldCamera)) ||
             !CheckRGL(rgl_graph_node_set_priority(rglNodeYieldCamera, 1))) {
             gzerr << "Failed to connect RGL nodes when initializing camera. Disabling plugin.\n";
             return;
@@ -384,7 +439,7 @@ void RGLServerPluginInstance::FetchAndPublishRaytraceResults()
             gzerr << "Failed to fetch PointCloud result data (sensor frame) from RGL lidar.\n";
             return;
         }
-        pointCloudPublisher.Publish(CreatePointCloudMsg(simTime, frameId, true));
+        pointCloudPublisher.Publish(CreatePointCloudMsg(simTime, frameId));
     }
 
     if (pointCloudWorldPublisher.HasConnections()) {
@@ -392,7 +447,7 @@ void RGLServerPluginInstance::FetchAndPublishRaytraceResults()
             gzerr << "Failed to fetch PointCloud result data (world frame) from RGL lidar.\n";
             return;
         }
-        auto msg = CreatePointCloudMsg(simTime, worldFrameId, false);
+        auto msg = CreatePointCloudMsg(simTime, worldFrameId);
         pointCloudWorldPublisher.Publish(msg);
     }
 }
@@ -448,7 +503,7 @@ gz::msgs::LaserScan RGLServerPluginInstance::CreateLaserScanMsg(std::chrono::ste
     return outMsg;
 }
 
-gz::msgs::PointCloudPacked RGLServerPluginInstance::CreatePointCloudMsg(std::chrono::steady_clock::duration simTime, const std::string& frame, bool sensorFrame)
+gz::msgs::PointCloudPacked RGLServerPluginInstance::CreatePointCloudMsg(std::chrono::steady_clock::duration simTime, const std::string& frame)
 {
     gz::msgs::PointCloudPacked outMsg;
     std::vector<std::pair<std::string, gz::msgs::PointCloudPacked::Field::DataType>> msgFields = {
@@ -485,9 +540,6 @@ gz::msgs::PointCloudPacked RGLServerPluginInstance::CreatePointCloudMsg(std::chr
             }
         }
         memcpy(out + pointCount * msgStep, point, copySize);
-        if (sensorFrame && noise.Active()) {
-            AddCloudNoise(reinterpret_cast<float*>(out + pointCount * msgStep));
-        }
         if (publishTimestamps) {
             memcpy(out + pointCount * msgStep + copySize, &timestamp, sizeof(timestamp));
         }
@@ -498,29 +550,6 @@ gz::msgs::PointCloudPacked RGLServerPluginInstance::CreatePointCloudMsg(std::chr
     outMsg.set_width(pointCount);
     outMsg.set_row_step(pointCount * msgStep);
     return outMsg;
-}
-
-void RGLServerPluginInstance::AddCloudNoise(float* xyz)
-{
-    std::normal_distribution<float> standard;
-    const gz::math::Vector3f point(xyz[0], xyz[1], xyz[2]);
-    const float distance = point.Length();
-    if (distance <= 0.0f) {
-        return;
-    }
-    gz::math::Vector3f direction = point / distance;
-    if (noise.angularStddev > 0.0f) {
-        // Two directions across the ray, tilted by small normal angles.
-        const gz::math::Vector3f helper = std::abs(direction.Z()) < 0.9f ? gz::math::Vector3f::UnitZ : gz::math::Vector3f::UnitX;
-        const gz::math::Vector3f across = direction.Cross(helper).Normalized();
-        const gz::math::Vector3f up = direction.Cross(across);
-        direction += noise.angularStddev * (standard(cloudNoiseGenerator) * across + standard(cloudNoiseGenerator) * up);
-        direction.Normalize();
-    }
-    const float noisy = distance + noise.Stddev(distance) * standard(cloudNoiseGenerator);
-    xyz[0] = noisy * direction.X();
-    xyz[1] = noisy * direction.Y();
-    xyz[2] = noisy * direction.Z();
 }
 
 bool RGLServerPluginInstance::FetchCameraFrame(std::chrono::steady_clock::duration simTime)
@@ -582,7 +611,6 @@ void RGLServerPluginInstance::PublishCameraFrames(std::stop_token stop)
 std::vector<float> RGLServerPluginInstance::MeasureDistances(const CameraFrame& frame)
 {
     const float nan = std::numeric_limits<float>::quiet_NaN();
-    std::normal_distribution<float> standard;
     std::vector<float> distances(frame.distances.size());
     for (std::size_t i = 0; i < distances.size(); ++i) {
         const float distance = frame.distances[i];
@@ -594,7 +622,7 @@ std::vector<float> RGLServerPluginInstance::MeasureDistances(const CameraFrame& 
             distances[i] = nan;
             continue;
         }
-        distances[i] = noise.Active() ? distance + noise.Stddev(distance) * standard(cameraNoiseGenerator) : distance;
+        distances[i] = distance;
     }
     return distances;
 }

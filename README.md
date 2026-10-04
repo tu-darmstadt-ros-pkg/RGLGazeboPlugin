@@ -165,13 +165,25 @@ Inside the link entity in your model, add a custom sensor:
 
 - **publish_timestamps** - adds a `timestamp` field (float64, nanoseconds of simulation time) to every point (optional, default: false).
 
-- **noise** - distance noise along each ray with standard deviation `distance_stddev + distance_stddev_quadratic * d^2` (metres, `d` the distance), and angular noise of the ray direction with standard deviation `angular_stddev` (radians, point clouds only; a depth image carries distance noise only). All three default to 0 (optional).
+- **noise** - the measurement noise, modelled by RGL on the GPU (optional, all default to no noise):
+  - `distance_stddev` (m) and `distance_stddev_quadratic` (1/m): distance noise along each ray with standard deviation `(distance_stddev + distance_stddev_quadratic * d^2) / cos(a)`, `d` the distance and `a` the incident angle between the ray and the surface normal.
+  - `max_incidence_angle` (rad, in (0, pi/2]): rays that meet a surface at a larger angle return nothing. At `pi/2`, the default, neither the noise nor the returns depend on the angle.
+  - `angular_stddev` (rad): each ray's direction tilts across itself before the raytrace, with this standard deviation about each of the two axes across the ray. Points stay on the surfaces.
   ```xml
   <noise>
       <distance_stddev>0.02</distance_stddev>
       <distance_stddev_quadratic>0.0</distance_stddev_quadratic>
+      <max_incidence_angle>1.40</max_incidence_angle>
       <angular_stddev>0.0026</angular_stddev>
   </noise>
+  ```
+
+- **stereo_occlusion** - with `pattern_camera`, models an active stereo camera: pixels whose point the second camera does not see, because something nearer hides it or it lies outside the second image, measure nothing, nor do those within `matching_band` pixels of them (optional). `baseline` (m) is the distance to the second camera along the image rows, positive when it is right of this one as seen along the view; the cameras are taken as rectified, with this camera's intrinsics.
+  ```xml
+  <stereo_occlusion>
+      <baseline>0.04</baseline>
+      <matching_band>1</matching_band>
+  </stereo_occlusion>
   ```
 
 - **camera_info_topic** - topic of the camera info (gz::msgs::CameraInfo) that goes with the depth image of `pattern_camera` (required with it).
@@ -276,9 +288,9 @@ Inside the link entity in your model, add a custom sensor:
   `topic` and its camera info on `camera_info_topic`, both with `frame` as
   frame id, which should name the optical frame (z along the view, x right,
   y down). `range` bounds the depth, as a depth camera's working range does; with
-  `filter_own_model`, pixels on the own model are NaN. Noise applies to the
-  measured distance, and the depth image and the cloud on `points_topic`
-  show the same measurement. The color image on `color_topic` sees the whole
+  `filter_own_model`, pixels on the own model are NaN. Noise and
+  `stereo_occlusion` apply to the measured distance, and the depth image and
+  the cloud on `points_topic` show the same measurement. The color image on `color_topic` sees the whole
   scene, the own model included, beyond `range` too; the colors are those of
   the materials as with `publish_color`, unlit, and pixels that hit nothing
   are white. Color image and cloud are only built while subscribed.
