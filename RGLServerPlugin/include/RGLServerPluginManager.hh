@@ -75,8 +75,9 @@ private:
     // Mesh bounds of each entity in RGL, in the entity's own frame
     std::unordered_map<gz::sim::Entity, gz::math::AxisAlignedBox> entityBounds;
 
-    // Lidars whose housing (the visual enclosing their origin) is not found yet
-    std::unordered_set<gz::sim::Entity> lidarsWithoutHousing;
+    // Lidars registered in this step. Their housings are looked up once, at
+    // the end of the step, when their model's visuals are loaded too.
+    std::unordered_set<gz::sim::Entity> newLidars;
 
     // Each lidar's raytrace schedule, by the rule its instance follows
     // (RaytraceDue). Updating an entity's transform waits for every running

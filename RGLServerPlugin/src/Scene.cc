@@ -49,7 +49,7 @@ bool RGLServerPluginManager::RegisterNewLidarCb(
     for (const auto& plugin : plugins) {
         if (plugin.name() == RGL_INSTANCE) {
             lidarEntities.insert(entity);
-            lidarsWithoutHousing.insert(entity);
+            newLidars.insert(entity);
             // Without a readable rate the transforms are updated every step.
             raytraceSchedules[entity] = {RaytraceInterval(entity, ecm).value_or(std::chrono::steady_clock::duration::zero()),
                                          RaytracePhase(entity, ecm)};
@@ -95,7 +95,7 @@ bool RGLServerPluginManager::UnregisterLidarCb(
         entitiesToIgnore.erase(entityInParentLink);
     }
     lidarEntities.erase(entity);
-    lidarsWithoutHousing.erase(entity);
+    newLidars.erase(entity);
     raytraceSchedules.erase(entity);
     return true;
 }
@@ -212,11 +212,11 @@ bool RGLServerPluginManager::RaytraceDueNextStep(const gz::sim::UpdateInfo& info
 
 void RGLServerPluginManager::IgnoreLidarHousings(const gz::sim::EntityComponentManager& ecm)
 {
-    for (auto lidar = lidarsWithoutHousing.begin(); lidar != lidarsWithoutHousing.end();) {
-        const gz::math::Vector3d origin = FindWorldPose(*lidar, ecm).Pos();
+    for (const auto lidar : newLidars) {
+        const gz::math::Vector3d origin = FindWorldPose(lidar, ecm).Pos();
         // A housing is part of the sensor's own model; a visual of the world
         // around it may enclose the origin too, and must stay visible.
-        const gz::sim::Entity ownModel = gz::sim::topLevelModel(*lidar, ecm);
+        const gz::sim::Entity ownModel = gz::sim::topLevelModel(lidar, ecm);
         gz::sim::Entity housing = gz::sim::kNullEntity;
         double housingVolume = std::numeric_limits<double>::infinity();
         for (const auto& [entity, bounds] : entityBounds) {
@@ -231,19 +231,19 @@ void RGLServerPluginManager::IgnoreLidarHousings(const gz::sim::EntityComponentM
             }
         }
         if (housing == gz::sim::kNullEntity) {
-            ++lidar;
+            gzmsg << "Lidar (" << lidar << ") has no housing; all visuals of its model occlude it.\n";
             continue;
         }
         if (!CheckRGL(rgl_entity_set_ignored_by_sensor(entitiesInRgl.at(housing).first,
-                                                       static_cast<int32_t>(*lidar)))) {
-            gzerr << "Failed to let lidar (" << *lidar << ") ignore its housing (" << housing << ").\n";
+                                                       static_cast<int32_t>(lidar)))) {
+            gzerr << "Failed to let lidar (" << lidar << ") ignore its housing (" << housing << ").\n";
         } else {
             const auto name = ecm.Component<gz::sim::components::Name>(housing);
-            gzmsg << "Lidar (" << *lidar << ") ignores its housing '"
+            gzmsg << "Lidar (" << lidar << ") ignores its housing '"
                   << (name ? name->Data() : std::to_string(housing)) << "'.\n";
         }
-        lidar = lidarsWithoutHousing.erase(lidar);
     }
+    newLidars.clear();
 }
 
 std::unordered_set<gz::sim::Entity> RGLServerPluginManager::GetEntitiesInParentLink(
