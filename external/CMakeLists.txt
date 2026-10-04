@@ -18,14 +18,15 @@ set(RGL_CUSTOM_API_HEADER_PATH "" CACHE PATH
      In most cases it will be path to `include` directory of RobotecGPULidar project")
 
 # The plugin requires the colored-point-cloud RGL API (rgl_texture_create_rgba8888,
-# rgl_entity_set_color_texture), which the stock RobotecAI releases do not provide.
+# rgl_entity_set_color_texture) and the sensor model nodes (incident angle noise,
+# ray direction noise, stereo occlusion), which the stock RobotecAI releases do not provide.
 # By default RGL is therefore cloned and built from source (requires the CUDA toolkit;
 # the OptiX headers are fetched automatically from NVIDIA's official header-only repo).
 set(RGL_BUILD_FROM_SOURCE ON CACHE BOOL
     "Clone and build RobotecGPULidar from source instead of downloading a prebuilt release.")
 set(RGL_GIT_REPOSITORY "https://github.com/tu-darmstadt-ros-pkg/RobotecGPULidar.git" CACHE STRING
     "Git repository to build RobotecGPULidar from.")
-set(RGL_GIT_TAG "color-pointcloud" CACHE STRING
+set(RGL_GIT_TAG "benchmark-dev" CACHE STRING
     "Git branch/tag/commit of RobotecGPULidar to build.")
 set(RGL_OPTIX_GIT_REPOSITORY "https://github.com/NVIDIA/optix-dev.git" CACHE STRING
     "Git repository providing the OptiX SDK headers (header-only, no NVIDIA login required).")

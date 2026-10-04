@@ -30,9 +30,9 @@
 #include <gz/msgs/camera_info.pb.h>
 #include <gz/msgs/image.pb.h>
 
+#include <cmath>
 #include <condition_variable>
 #include <mutex>
-#include <random>
 #include <stop_token>
 #include <thread>
 
@@ -83,8 +83,7 @@ private:
     bool FetchLaserScanResult();
     bool FetchPointCloudResult(rgl_node_t formatNode);
 
-    // Noise only in the sensor frame, where a point's direction is its ray.
-    gz::msgs::PointCloudPacked CreatePointCloudMsg(std::chrono::steady_clock::duration sim_time, const std::string& frame, bool sensorFrame);
+    gz::msgs::PointCloudPacked CreatePointCloudMsg(std::chrono::steady_clock::duration sim_time, const std::string& frame);
     gz::msgs::LaserScan CreateLaserScanMsg(std::chrono::steady_clock::duration sim_time, const std::string& frame);
     // pattern_camera: one ray per pixel. The simulation thread only copies the
     // per-ray results; a worker thread builds and publishes the images.
@@ -97,7 +96,7 @@ private:
     };
     bool FetchCameraFrame(std::chrono::steady_clock::duration sim_time);
     void PublishCameraFrames(std::stop_token stop);
-    // Each pixel's distance as measured: depth within the range, with noise, NaN
+    // Each pixel's measured distance where its depth is within the range, NaN
     // where nothing is measured or, with filter_own_model, the own model is seen.
     std::vector<float> MeasureDistances(const CameraFrame& frame);
     gz::msgs::Image CreateDepthImageMsg(std::chrono::steady_clock::duration sim_time, const std::vector<float>& distances);
@@ -161,21 +160,28 @@ private:
     // Add a per-point "timestamp" field (float64, ns of simulation time).
     bool publishTimestamps = false;
 
-    // <noise>: distance noise along each ray with stddev a + b * d^2, and
-    // angular noise of the ray direction (point clouds only).
+    // <noise>, applied by RGL: distance noise along each ray with stddev
+    // (a + b * d^2) / cos(incident angle), no hit beyond the maximum incident
+    // angle, and a tilt of each ray's direction.
     struct Noise
     {
-        float distanceStddev = 0.0f;           // a, m
-        float distanceStddevQuadratic = 0.0f;  // b, 1/m
-        float angularStddev = 0.0f;            // rad
-        float Stddev(float distance) const { return distanceStddev + distanceStddevQuadratic * distance * distance; }
-        bool Active() const { return distanceStddev > 0.0f || distanceStddevQuadratic > 0.0f || angularStddev > 0.0f; }
+        float distanceStddev = 0.0f;                         // a, m
+        float distanceStddevQuadratic = 0.0f;                // b, 1/m
+        float maxIncidenceAngle = static_cast<float>(M_PI_2);  // rad; pi/2: no dependence on the angle
+        float angularStddev = 0.0f;                          // rad
+        bool DistanceActive() const
+        {
+            return distanceStddev > 0.0f || distanceStddevQuadratic > 0.0f || maxIncidenceAngle < static_cast<float>(M_PI_2);
+        }
     } noise;
-    // One generator per thread that applies noise: clouds on the simulation
-    // thread, camera frames on the publishing thread.
-    std::mt19937 cloudNoiseGenerator{std::random_device{}()};
-    std::mt19937 cameraNoiseGenerator{std::random_device{}()};
-    void AddCloudNoise(float* xyz);
+    // <stereo_occlusion>, pattern_camera only: the pixels an active stereo
+    // camera does not measure because its second camera does not see them.
+    struct StereoOcclusion
+    {
+        bool active = false;
+        float baseline = 0.0f;  // m, positive when the second camera is right of this one
+        int matchingBand = 0;   // pixels
+    } stereoOcclusion;
     // RGL entity id of the sensor's model; the manager sets each entity's id to its model.
     int32_t ownModelId = -1;
 
@@ -192,7 +198,10 @@ private:
     std::vector<rgl_node_t> rglNodesUseRays;
     rgl_node_t rglNodeLidarPose = nullptr;
     rgl_node_t rglNodeSetRange = nullptr;
+    rgl_node_t rglNodeRayNoise = nullptr;
     rgl_node_t rglNodeRaytrace = nullptr;
+    rgl_node_t rglNodeStereoOcclusion = nullptr;
+    rgl_node_t rglNodeDistanceNoise = nullptr;
     rgl_node_t rglNodeCompact = nullptr;
     rgl_node_t rglNodeYieldLaserScan = nullptr;
     rgl_node_t rglNodeFormatPointCloudSensor = nullptr;
