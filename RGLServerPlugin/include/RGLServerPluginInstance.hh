@@ -97,7 +97,7 @@ private:
     };
     bool FetchCameraFrame(std::chrono::steady_clock::duration sim_time);
     void PublishCameraFrames(std::stop_token stop);
-    // Each pixel's distance as measured: within the range, with noise, NaN
+    // Each pixel's distance as measured: depth within the range, with noise, NaN
     // where nothing is measured or, with filter_own_model, the own model is seen.
     std::vector<float> MeasureDistances(const CameraFrame& frame);
     gz::msgs::Image CreateDepthImageMsg(std::chrono::steady_clock::duration sim_time, const std::vector<float>& distances);

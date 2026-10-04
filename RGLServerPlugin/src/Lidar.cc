@@ -586,9 +586,11 @@ std::vector<float> RGLServerPluginInstance::MeasureDistances(const CameraFrame& 
     std::vector<float> distances(frame.distances.size());
     for (std::size_t i = 0; i < distances.size(); ++i) {
         const float distance = frame.distances[i];
+        const float depth = distance * opticalDirections[i].Z();
         const bool own = filterOwnModel && frame.entityIds[i] == ownModelId;
-        // NaN, a miss, fails both comparisons.
-        if (own || !(distance >= lidarMinMaxRange.value[0] && distance <= lidarMinMaxRange.value[1])) {
+        // A depth camera's working range is a range of depth. NaN, a miss,
+        // fails both comparisons.
+        if (own || !(depth >= lidarMinMaxRange.value[0] && depth <= lidarMinMaxRange.value[1])) {
             distances[i] = nan;
             continue;
         }
