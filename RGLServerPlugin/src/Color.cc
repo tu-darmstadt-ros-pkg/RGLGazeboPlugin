@@ -53,20 +53,27 @@ std::string ResolveTexturePath(const std::string& uri, const std::string& filePa
 
 rgl_texture_t RGLServerPluginManager::GetColorTextureFromFile(const std::string& texturePath)
 {
-    const std::string cacheKey = "file:" + texturePath;
-    if (auto it = colorTextureCache.find(cacheKey); it != colorTextureCache.end()) {
+    if (auto it = colorTextureCache.find(texturePath); it != colorTextureCache.end()) {
+        return it->second;
+    }
+    gz::common::Image image(texturePath);
+    return GetColorTextureFromImage(image, texturePath);
+}
+
+rgl_texture_t RGLServerPluginManager::GetColorTextureFromImage(const gz::common::Image& image, const std::string& name)
+{
+    if (auto it = colorTextureCache.find(name); it != colorTextureCache.end()) {
         return it->second;
     }
 
-    gz::common::Image image(texturePath);
     if (!image.Valid() || image.Width() == 0 || image.Height() == 0) {
-        gzwarn << "Failed to load texture image '" << texturePath << "' for RGL color texture.\n";
+        gzwarn << "Failed to load texture image '" << name << "' for RGL color texture.\n";
         return nullptr;
     }
 
     std::vector<unsigned char> rgbaData = image.RGBAData();
     if (rgbaData.size() != static_cast<std::size_t>(image.Width()) * image.Height() * 4) {
-        gzwarn << "Unexpected RGBA data size for texture image '" << texturePath << "'.\n";
+        gzwarn << "Unexpected RGBA data size for texture image '" << name << "'.\n";
         return nullptr;
     }
 
@@ -74,11 +81,11 @@ rgl_texture_t RGLServerPluginManager::GetColorTextureFromFile(const std::string&
     if (!CheckRGL(rgl_texture_create_rgba8888(&texture, rgbaData.data(),
                                               static_cast<int32_t>(image.Width()),
                                               static_cast<int32_t>(image.Height())))) {
-        gzwarn << "Failed to create RGL color texture from image '" << texturePath << "'.\n";
+        gzwarn << "Failed to create RGL color texture from image '" << name << "'.\n";
         return nullptr;
     }
 
-    colorTextureCache.insert({cacheKey, texture});
+    colorTextureCache.insert({name, texture});
     return texture;
 }
 
@@ -186,6 +193,13 @@ rgl_texture_t RGLServerPluginManager::GetColorTexture(
                 continue;
             }
             fallbackMaterial = fallbackMaterial ? fallbackMaterial : material;
+            // Mesh loaders hand over textures they decoded (e.g. glTF) as image
+            // data, under a name that need not be a file.
+            if (const auto image = material->TextureData()) {
+                if (auto texture = GetColorTextureFromImage(*image, material->TextureImage())) {
+                    return texture;
+                }
+            }
             std::string texturePath = ResolveTexturePath(material->TextureImage(), meshPath);
             if (!texturePath.empty()) {
                 if (auto texture = GetColorTextureFromFile(texturePath)) {

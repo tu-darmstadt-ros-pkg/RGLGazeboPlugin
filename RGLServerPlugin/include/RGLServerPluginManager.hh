@@ -18,6 +18,7 @@
 
 #include "Utils.hh"
 
+#include <gz/common/Image.hh>
 #include <gz/common/MeshManager.hh>
 
 #include <gz/sim/components/Geometry.hh>
@@ -205,6 +206,10 @@ private:
 
     // Returns a cached (or newly created) 4-channel RGL texture from an image file.
     rgl_texture_t GetColorTextureFromFile(const std::string& texturePath);
+
+    // Returns a cached (or newly created) 4-channel RGL texture from an image,
+    // cached under the given name.
+    rgl_texture_t GetColorTextureFromImage(const gz::common::Image& image, const std::string& name);
 
     // Returns a cached (or newly created) 1x1 4-channel RGL texture of a uniform color.
     rgl_texture_t GetColorTextureFromColor(const gz::math::Color& color);
