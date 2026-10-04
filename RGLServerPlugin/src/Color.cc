@@ -108,11 +108,11 @@ rgl_texture_t RGLServerPluginManager::GetColorTextureFromColor(const gz::math::C
 
 bool RGLServerPluginManager::PluginRequestsColor(const std::string& pluginInnerXml)
 {
-    // The lidar instance plugin parses this parameter itself (see RGLServerPluginInstance);
+    // The lidar instance plugin parses these parameters itself (see RGLServerPluginInstance);
     // the manager only needs to know whether any lidar will ask for color at all.
-    static const std::regex publishColorRegex(
-            "<publish_color>\\s*(true|1)\\s*</publish_color>", std::regex::icase);
-    return std::regex_search(pluginInnerXml, publishColorRegex);
+    static const std::regex colorRegex(
+            "<publish_color>\\s*(true|1)\\s*</publish_color>|<color_topic>", std::regex::icase);
+    return std::regex_search(pluginInnerXml, colorRegex);
 }
 
 void RGLServerPluginManager::AssignColorTexturesToLoadedEntities(const gz::sim::EntityComponentManager& ecm)

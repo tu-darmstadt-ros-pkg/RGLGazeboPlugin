@@ -59,7 +59,7 @@ bool RGLServerPluginManager::RegisterNewLidarCb(
                 }
             }
             if (!colorTexturesEnabled && PluginRequestsColor(plugin.innerxml())) {
-                gzmsg << "A lidar with publish_color enabled was registered; "
+                gzmsg << "A lidar with colors (publish_color or color_topic) was registered; "
                       << "loading color textures for scene entities.\n";
                 colorTexturesEnabled = true;
                 AssignColorTexturesToLoadedEntities(ecm);

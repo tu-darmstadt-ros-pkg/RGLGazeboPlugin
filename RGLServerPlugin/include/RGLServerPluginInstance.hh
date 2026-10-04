@@ -87,16 +87,22 @@ private:
     gz::msgs::PointCloudPacked CreatePointCloudMsg(std::chrono::steady_clock::duration sim_time, const std::string& frame, bool sensorFrame);
     gz::msgs::LaserScan CreateLaserScanMsg(std::chrono::steady_clock::duration sim_time, const std::string& frame);
     // pattern_camera: one ray per pixel. The simulation thread only copies the
-    // per-ray results; a worker thread builds and publishes the image.
-    struct DepthFrame
+    // per-ray results; a worker thread builds and publishes the images.
+    struct CameraFrame
     {
         std::chrono::steady_clock::duration simTime{0};
         std::vector<float> distances{};
         std::vector<int32_t> entityIds{};
+        std::vector<uint32_t> colors{};  // 0xAARRGGBB
     };
-    bool FetchDepthFrame(std::chrono::steady_clock::duration sim_time);
-    void PublishDepthFrames(std::stop_token stop);
-    gz::msgs::Image CreateDepthImageMsg(const DepthFrame& frame);
+    bool FetchCameraFrame(std::chrono::steady_clock::duration sim_time);
+    void PublishCameraFrames(std::stop_token stop);
+    // Each pixel's distance as measured: within the range, with noise, NaN
+    // where nothing is measured or, with filter_own_model, the own model is seen.
+    std::vector<float> MeasureDistances(const CameraFrame& frame);
+    gz::msgs::Image CreateDepthImageMsg(std::chrono::steady_clock::duration sim_time, const std::vector<float>& distances);
+    gz::msgs::Image CreateColorImageMsg(const CameraFrame& frame);
+    gz::msgs::PointCloudPacked CreateCameraPointCloudMsg(const CameraFrame& frame, const std::vector<float>& distances);
     gz::msgs::CameraInfo CreateCameraInfoMsg(std::chrono::steady_clock::duration sim_time);
 
     void DestroyLidar();
@@ -140,10 +146,15 @@ private:
 
     bool updateOnPausedSim = false;
     bool publishLaserScan = false;
-    // pattern_camera: publish a depth image and its camera info instead of a point cloud.
+    // pattern_camera: publish a depth image and its camera info instead of a
+    // point cloud, and optionally a color image and an organized point cloud.
     bool publishDepthImage = false;
     CameraModel camera;
     std::string cameraInfoTopicName;
+    std::string colorTopicName;
+    std::string cameraPointsTopicName;
+    // Whether the camera's rays return colors, for the color image or the cloud.
+    bool cameraColor = false;
     bool publishColor = false;
     // Drop points on the model the sensor belongs to, as a robot's self-filter does.
     bool filterOwnModel = false;
@@ -161,9 +172,9 @@ private:
         bool Active() const { return distanceStddev > 0.0f || distanceStddevQuadratic > 0.0f || angularStddev > 0.0f; }
     } noise;
     // One generator per thread that applies noise: clouds on the simulation
-    // thread, depth images on the publishing thread.
+    // thread, camera frames on the publishing thread.
     std::mt19937 cloudNoiseGenerator{std::random_device{}()};
-    std::mt19937 depthNoiseGenerator{std::random_device{}()};
+    std::mt19937 cameraNoiseGenerator{std::random_device{}()};
     void AddCloudNoise(float* xyz);
     // RGL entity id of the sensor's model; the manager sets each entity's id to its model.
     int32_t ownModelId = -1;
@@ -173,6 +184,8 @@ private:
     gz::transport::Node::Publisher laserScanPublisher;
     gz::transport::Node::Publisher depthImagePublisher;
     gz::transport::Node::Publisher cameraInfoPublisher;
+    gz::transport::Node::Publisher colorImagePublisher;
+    gz::transport::Node::Publisher cameraPointsPublisher;
     gz::transport::Node::Publisher pointCloudWorldPublisher;
     gz::transport::Node gazeboNode;
 
@@ -185,14 +198,16 @@ private:
     rgl_node_t rglNodeFormatPointCloudSensor = nullptr;
     rgl_node_t rglNodeFormatPointCloudWorld = nullptr;
     rgl_node_t rglNodeToLidarFrame = nullptr;
-    rgl_node_t rglNodeYieldDepth = nullptr;
+    rgl_node_t rglNodeYieldCamera = nullptr;
 
-    // Depth along the optical axis per metre of a pixel's ray.
-    std::vector<float> depthPerDistance;
-    DepthFrame pendingDepthFrame;
-    bool depthFramePending = false;
-    std::mutex depthMutex;
-    std::condition_variable_any depthCondition;
+    // Each pixel's ray direction in the optical frame (z along the view, x
+    // right, y down): a distance along the ray times it is the pixel's point,
+    // and its z is the depth per metre of distance.
+    std::vector<gz::math::Vector3f> opticalDirections;
+    CameraFrame pendingCameraFrame;
+    bool cameraFramePending = false;
+    std::mutex cameraMutex;
+    std::condition_variable_any cameraCondition;
 
     std::chrono::steady_clock::duration raytraceIntervalTime;
     std::chrono::steady_clock::duration raytracePhase{0};
@@ -216,7 +231,7 @@ private:
     const std::string worldTopicPostfix = "/world";
 
     // Last, so it is stopped and joined before the members it uses go.
-    std::jthread depthPublisherThread;
+    std::jthread cameraPublisherThread;
 };
 
 }  // namespace rgl

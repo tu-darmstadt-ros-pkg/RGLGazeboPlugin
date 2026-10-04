@@ -159,7 +159,7 @@ Inside the link entity in your model, add a custom sensor:
 
 - **update_on_paused_sim** - determines whether the lidar is active when the simulation is paused (optional, default: false).
 
-- **publish_color** - adds an `rgb` field (packed float, PCL/RViz convention) to the point cloud message, colored from the materials of the hit visuals (optional, default: false). The color is resolved per visual: PBR albedo texture of the SDF material, mesh-embedded material texture, or the diffuse color as fallback. Visuals with no material yield white points. Requires a RobotecGPULidar build with `RGL_FIELD_COLOR_RGBA_U32` support. When `pattern_lidar2d` is used, the main topic publishes LaserScan (no color); color applies only to the optional `<topic>/world` PointCloudPacked topic.
+- **publish_color** - adds an `rgb` field (packed float, PCL/RViz convention) to the point cloud message, colored from the materials of the hit visuals (optional, default: false). The color is resolved per visual: PBR albedo texture of the SDF material, mesh-embedded material texture, or the diffuse color as fallback. Visuals with no material yield white points. Requires a RobotecGPULidar build with `RGL_FIELD_COLOR_RGBA_U32` support. When `pattern_lidar2d` is used, the main topic publishes LaserScan (no color); color applies only to the optional `<topic>/world` PointCloudPacked topic. With `pattern_camera`, the field goes into the cloud on `points_topic`.
 
 - **filter_own_model** - drops points on the model the lidar belongs to, as a robot's self-filter does (optional, default: false). The model still occludes the rays.
 
@@ -175,6 +175,10 @@ Inside the link entity in your model, add a custom sensor:
   ```
 
 - **camera_info_topic** - topic of the camera info (gz::msgs::CameraInfo) that goes with the depth image of `pattern_camera` (required with it).
+
+- **color_topic** - with `pattern_camera`, a topic for a color image (gz::msgs::Image, `RGB_INT8`) registered to the depth image: the same pixels, frame and camera info (optional).
+
+- **points_topic** - with `pattern_camera`, a topic for the depth image as an organized point cloud (gz::msgs::PointCloudPacked, width × height, NaN where the depth image is NaN) in the optical frame, with `rgb` and `timestamp` fields as `publish_color` and `publish_timestamps` ask (optional).
 
 - **pattern_\<type\>** - definition of the lidar firing pattern. Each type has different parameters described below.
 
@@ -271,7 +275,13 @@ Inside the link entity in your model, add a custom sensor:
   depth along the optical axis in metres, NaN where nothing is hit) on
   `topic` and its camera info on `camera_info_topic`, both with `frame` as
   frame id, which should name the optical frame (z along the view, x right,
-  y down). With `filter_own_model`, pixels on the own model are NaN.
+  y down). `range` bounds the measured distance along each pixel's ray; with
+  `filter_own_model`, pixels on the own model are NaN. Noise applies to the
+  measured distance, and the depth image and the cloud on `points_topic`
+  show the same measurement. The color image on `color_topic` sees the whole
+  scene, the own model included, beyond `range` too; the colors are those of
+  the materials as with `publish_color`, unlit, and pixels that hit nothing
+  are white. Color image and cloud are only built while subscribed.
   ```xml
   <pattern_camera>
       <width>640</width>
