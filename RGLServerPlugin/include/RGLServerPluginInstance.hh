@@ -76,8 +76,7 @@ private:
     void UpdateLidarPose(const gz::sim::EntityComponentManager& ecm);
     void UpdateAlternatingLidarPattern();
 
-    bool ShouldRayTrace(std::chrono::steady_clock::duration sim_time,
-                        bool paused);
+    bool ShouldRayTrace(const gz::sim::UpdateInfo& info);
     void RayTrace(std::chrono::steady_clock::duration sim_time);
     void FetchAndPublishRaytraceResults();
 
@@ -196,11 +195,13 @@ private:
     std::condition_variable_any depthCondition;
 
     std::chrono::steady_clock::duration raytraceIntervalTime;
-    std::chrono::steady_clock::duration lastRaytraceTime{0};
-    bool raytracePhaseSet = false;
+    std::chrono::steady_clock::duration raytracePhase{0};
 
-    // rgl_graph_run is asynchronous (GPU); results are fetched one PreUpdate later so the
-    // raytrace never blocks the serial physics step.
+    // rgl_graph_run is asynchronous (GPU); the result is fetched
+    // publishDelaySteps later, or before the next raytrace if that comes
+    // first, so the simulation goes on while the GPU works.
+    int publishDelaySteps = 0;
+    int stepsSinceRaytrace = 0;
     bool raytracePending = false;
     std::chrono::steady_clock::duration pendingRaytraceTime{0};
 

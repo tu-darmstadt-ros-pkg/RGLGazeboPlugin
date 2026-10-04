@@ -55,6 +55,15 @@ std::chrono::steady_clock::duration RaytracePhase(
         gz::sim::Entity sensor,
         const gz::sim::EntityComponentManager& ecm);
 
+// Whether a sensor raytraces in the step from simTime - dt to simTime: its
+// raytraces lie at phase + n * interval, each taken by the step that reaches
+// it. The schedule depends on sim time only, not on when the sensor appeared
+// or whether the simulation was paused.
+bool RaytraceDue(std::chrono::steady_clock::duration interval,
+                 std::chrono::steady_clock::duration phase,
+                 std::chrono::steady_clock::duration simTime,
+                 std::chrono::steady_clock::duration dt);
+
 
 // Throws exception when version of RGL library mismatch
 void ValidateRGLVersion();

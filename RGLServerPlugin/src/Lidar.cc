@@ -30,6 +30,7 @@
 #define PARAM_TOPIC_ID "topic"
 #define PARAM_FRAME_ID "frame"
 #define PARAM_UPDATE_ON_PAUSED_SIM_ID "update_on_paused_sim"
+#define PARAM_PUBLISH_DELAY_STEPS_ID "publish_delay_steps"
 #define PARAM_PUBLISH_COLOR_ID "publish_color"
 #define PARAM_FILTER_OWN_MODEL_ID "filter_own_model"
 #define PARAM_PUBLISH_TIMESTAMPS_ID "publish_timestamps"
@@ -74,6 +75,14 @@ bool RGLServerPluginInstance::LoadConfiguration(const std::shared_ptr<const sdf:
                 << "Using default value: " << updateOnPausedSim << "\n";
     } else {
         updateOnPausedSim = sdf->Get<bool>(PARAM_UPDATE_ON_PAUSED_SIM_ID);
+    }
+
+    if (sdf->HasElement(PARAM_PUBLISH_DELAY_STEPS_ID)) {
+        publishDelaySteps = sdf->Get<int>(PARAM_PUBLISH_DELAY_STEPS_ID);
+        if (publishDelaySteps < 0) {
+            gzerr << "'" << PARAM_PUBLISH_DELAY_STEPS_ID << "' must not be negative. Disabling plugin.\n";
+            return false;
+        }
     }
 
     // Load configuration
@@ -153,6 +162,8 @@ void RGLServerPluginInstance::CreateLidar(gz::sim::Entity entity,
 {
     thisLidarEntity = entity;
     ownModelId = static_cast<int32_t>(gz::sim::topLevelModel(entity, ecm));
+    // The model's sensors all exist when its systems are configured.
+    raytracePhase = RaytracePhase(entity, ecm);
 
     rgl_mat3x4f identity = {
         1, 0, 0, 0,
@@ -286,14 +297,13 @@ void RGLServerPluginInstance::UpdateAlternatingLidarPattern()
     }
 }
 
-bool RGLServerPluginInstance::ShouldRayTrace(std::chrono::steady_clock::duration simTime,
-                                             bool paused)
+bool RGLServerPluginInstance::ShouldRayTrace(const gz::sim::UpdateInfo& info)
 {
     if (!isLidarInitialized) {
         return false;
     }
 
-    if (paused) {
+    if (info.paused) {
         ++onPausedSimUpdateCounter;
         if (!updateOnPausedSim) {
             return false;
@@ -305,11 +315,8 @@ bool RGLServerPluginInstance::ShouldRayTrace(std::chrono::steady_clock::duration
         return true;
     }
 
-    // Simulation running
-    if (simTime < lastRaytraceTime + raytraceIntervalTime) {
-        return false;
-    }
-    return true;
+    // Simulation running; the manager follows the same schedule.
+    return RaytraceDue(raytraceIntervalTime, raytracePhase, info.simTime, info.dt);
 }
 
 void RGLServerPluginInstance::RayTrace(std::chrono::steady_clock::duration simTime)
@@ -318,14 +325,13 @@ void RGLServerPluginInstance::RayTrace(std::chrono::steady_clock::duration simTi
         UpdateAlternatingLidarPattern();
     }
 
-    lastRaytraceTime = simTime;
-
     if (!CheckRGL(rgl_graph_run(rglNodeRaytrace))) {
         gzerr << "Failed to perform raytrace.\n";
         return;
     }
-    // rgl_graph_run only queues GPU work; results are collected next PreUpdate.
+    // rgl_graph_run only queues GPU work; the result is fetched later.
     raytracePending = true;
+    stepsSinceRaytrace = 0;
     pendingRaytraceTime = simTime;
 }
 

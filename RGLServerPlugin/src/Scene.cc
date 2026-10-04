@@ -198,17 +198,16 @@ void RGLServerPluginManager::UpdateRGLEntityTransforms(const gz::sim::EntityComp
     }
 }
 
-bool RGLServerPluginManager::RaytraceDueNextStep(const gz::sim::UpdateInfo& info)
+bool RGLServerPluginManager::RaytraceDueNextStep(const gz::sim::UpdateInfo& info) const
 {
-    const auto next = info.simTime + info.dt;
-    bool due = false;
-    for (auto& [lidar, schedule] : raytraceSchedules) {
-        if (next >= schedule.last + schedule.interval) {
-            schedule.last = next;
-            due = true;
+    // The next step is expected to be as long as this one.
+    for (const auto& [lidar, schedule] : raytraceSchedules) {
+        if (schedule.interval == std::chrono::steady_clock::duration::zero() ||
+            RaytraceDue(schedule.interval, schedule.phase, info.simTime + info.dt, info.dt)) {
+            return true;
         }
     }
-    return due;
+    return false;
 }
 
 void RGLServerPluginManager::IgnoreLidarHousings(const gz::sim::EntityComponentManager& ecm)

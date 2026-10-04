@@ -139,6 +139,20 @@ std::chrono::steady_clock::duration RaytracePhase(
     return *interval * rank / static_cast<int64_t>(std::max<std::size_t>(peers.size(), 1));
 }
 
+bool RaytraceDue(std::chrono::steady_clock::duration interval,
+                 std::chrono::steady_clock::duration phase,
+                 std::chrono::steady_clock::duration simTime,
+                 std::chrono::steady_clock::duration dt)
+{
+    // The number of raytrace times up to t.
+    const auto count = [&](std::chrono::steady_clock::duration t) {
+        const auto sinceFirst = t - phase;
+        const auto n = sinceFirst / interval;
+        return sinceFirst % interval < std::chrono::steady_clock::duration::zero() ? n - 1 : n;
+    };
+    return count(simTime) > count(simTime - dt);
+}
+
 void ValidateRGLVersion()
 {
     int32_t outMajor, outMinor, outPatch;

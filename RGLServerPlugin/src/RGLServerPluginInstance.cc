@@ -46,17 +46,14 @@ void RGLServerPluginInstance::PreUpdate(
         const gz::sim::UpdateInfo& info,
         gz::sim::EntityComponentManager& ecm)
 {
-    // Once the model's sensors all exist; the manager follows the same schedule.
-    if (!raytracePhaseSet) {
-        lastRaytraceTime = RaytracePhase(thisLidarEntity, ecm);
-        raytracePhaseSet = true;
-    }
-    // The previous raytrace is collected only when the next one is due, a
-    // whole update interval later, so the simulation never waits for the GPU.
-    if (ShouldRayTrace(info.simTime, info.paused)) {
+    if (ShouldRayTrace(info)) {
         FetchAndPublishRaytraceResults();
         UpdateLidarPose(ecm);
-        RayTrace(info.simTime);
+        // The poses are those the previous step left, at simTime - dt.
+        RayTrace(info.simTime - info.dt);
+    }
+    if (raytracePending && stepsSinceRaytrace++ >= publishDelaySteps) {
+        FetchAndPublishRaytraceResults();
     }
 }
 

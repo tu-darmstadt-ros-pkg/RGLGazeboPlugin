@@ -78,15 +78,13 @@ private:
     // Lidars whose housing (the visual enclosing their origin) is not found yet
     std::unordered_set<gz::sim::Entity> lidarsWithoutHousing;
 
-    // Each lidar's raytrace schedule, by the rule its instance follows: a
-    // raytrace when sim time reaches the last one plus the update interval,
-    // the first one interval after its phase (RaytracePhase). Updating an
-    // entity's transform waits for every running raytrace, so the transforms
-    // are updated only on the step before a raytrace.
+    // Each lidar's raytrace schedule, by the rule its instance follows
+    // (RaytraceDue). Updating an entity's transform waits for every running
+    // raytrace, so the transforms are updated only on the step before a raytrace.
     struct RaytraceSchedule
     {
         std::chrono::steady_clock::duration interval{0};  // zero: every step
-        std::chrono::steady_clock::duration last{0};
+        std::chrono::steady_clock::duration phase{0};
     };
     std::unordered_map<gz::sim::Entity, RaytraceSchedule> raytraceSchedules;
 
@@ -136,7 +134,7 @@ private:
 
     // Whether a lidar raytraces in the next step, which then sees the
     // transforms this step leaves.
-    bool RaytraceDueNextStep(const gz::sim::UpdateInfo& info);
+    bool RaytraceDueNextStep(const gz::sim::UpdateInfo& info) const;
 
     // Lets each lidar's rays pass through its housing: the smallest visual whose
     // bounds enclose the lidar's origin. The rest of its model still occludes.
