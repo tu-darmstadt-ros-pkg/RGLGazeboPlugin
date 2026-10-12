@@ -117,7 +117,11 @@ elseif(RGL_BUILD_FROM_SOURCE) # Clone and build RobotecGPULidar from source
         if(RGL_NPROC EQUAL 0)
             set(RGL_NPROC 4)
         endif()
+        # The env must cover the build step as well: nvcc may be a ccache masquerade
+        # that resolves the real compiler through PATH at every invocation, so a
+        # build without the prepended PATH would silently switch CUDA toolkits.
         rgl_run_step("build RobotecGPULidar"
+            ${CMAKE_COMMAND} -E env ${RGL_BUILD_ENV}
             ${CMAKE_COMMAND} --build ${RGL_BUILD_DIR} --target RobotecGPULidar --parallel ${RGL_NPROC})
 
         file(MAKE_DIRECTORY ${RGL_LIBRARY_DIR})
