@@ -287,7 +287,8 @@ Inside the link entity in your model, add a custom sensor:
   depth along the optical axis in metres, NaN where nothing is hit) on
   `topic` and its camera info on `camera_info_topic`, both with `frame` as
   frame id, which should name the optical frame (z along the view, x right,
-  y down). `range` bounds the depth, as a depth camera's working range does; with
+  y down). `range` bounds the depth, as a depth camera's working range does,
+  both before and after the noise, so a surface beyond it measures nothing; with
   `filter_own_model`, pixels on the own model are NaN. Noise and
   `stereo_occlusion` apply to the measured distance, and the depth image and
   the cloud on `points_topic` show the same measurement. The color image on `color_topic` sees the whole

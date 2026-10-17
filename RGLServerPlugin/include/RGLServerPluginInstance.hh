@@ -91,6 +91,7 @@ private:
     {
         std::chrono::steady_clock::duration simTime{0};
         std::vector<float> distances{};
+        std::vector<float> trueDistances{};  // before the distance noise, empty without it
         std::vector<int32_t> entityIds{};
         std::vector<uint32_t> colors{};  // 0xAARRGGBB
     };
@@ -208,6 +209,7 @@ private:
     rgl_node_t rglNodeFormatPointCloudWorld = nullptr;
     rgl_node_t rglNodeToLidarFrame = nullptr;
     rgl_node_t rglNodeYieldCamera = nullptr;
+    rgl_node_t rglNodeYieldTrueDistance = nullptr;
 
     // Each pixel's ray direction in the optical frame (z along the view, x
     // right, y down): a distance along the ray times it is the pixel's point,

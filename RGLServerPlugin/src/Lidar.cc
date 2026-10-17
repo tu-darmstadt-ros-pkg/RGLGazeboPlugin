@@ -312,6 +312,15 @@ void RGLServerPluginInstance::CreateLidar(gz::sim::Entity entity,
             gzerr << "Failed to connect RGL nodes when initializing camera. Disabling plugin.\n";
             return;
         }
+        // Noise can carry a hit far beyond the range into it, so the range also
+        // bounds the distance before the noise.
+        const rgl_field_t distanceField = RGL_FIELD_DISTANCE_F32;
+        if (noise.DistanceActive() &&
+            (!CheckRGL(rgl_node_points_yield(&rglNodeYieldTrueDistance, &distanceField, 1)) ||
+             !CheckRGL(rgl_graph_node_add_child(rglNodeRaytrace, rglNodeYieldTrueDistance)))) {
+            gzerr << "Failed to yield the camera's distance before the noise. Disabling plugin.\n";
+            return;
+        }
         // A ray's direction is the third column of its rotation, in the
         // sensor frame (x along the view, y left, z up).
         opticalDirections.resize(lidarPatternSampleSize);
@@ -563,6 +572,13 @@ bool RGLServerPluginInstance::FetchCameraFrame(std::chrono::steady_clock::durati
     if (!CheckRGL(rgl_graph_get_result_data(rglNodeYieldCamera, RGL_FIELD_DISTANCE_F32, frame.distances.data()))) {
         return false;
     }
+    if (rglNodeYieldTrueDistance != nullptr) {
+        frame.trueDistances.resize(lidarPatternSampleSize);
+        if (!CheckRGL(rgl_graph_get_result_data(rglNodeYieldTrueDistance, RGL_FIELD_DISTANCE_F32,
+                                                frame.trueDistances.data()))) {
+            return false;
+        }
+    }
     if (filterOwnModel) {
         frame.entityIds.resize(lidarPatternSampleSize);
         if (!CheckRGL(rgl_graph_get_result_data(rglNodeYieldCamera, RGL_FIELD_ENTITY_ID_I32, frame.entityIds.data()))) {
@@ -611,14 +627,19 @@ void RGLServerPluginInstance::PublishCameraFrames(std::stop_token stop)
 std::vector<float> RGLServerPluginInstance::MeasureDistances(const CameraFrame& frame)
 {
     const float nan = std::numeric_limits<float>::quiet_NaN();
+    // A depth camera's working range is a range of depth. NaN, a miss, fails
+    // both comparisons.
+    const auto inRange = [this](float depth) {
+        return depth >= lidarMinMaxRange.value[0] && depth <= lidarMinMaxRange.value[1];
+    };
+    const bool noisy = !frame.trueDistances.empty();
     std::vector<float> distances(frame.distances.size());
     for (std::size_t i = 0; i < distances.size(); ++i) {
         const float distance = frame.distances[i];
-        const float depth = distance * opticalDirections[i].Z();
+        const float depthPerMetre = opticalDirections[i].Z();
         const bool own = filterOwnModel && frame.entityIds[i] == ownModelId;
-        // A depth camera's working range is a range of depth. NaN, a miss,
-        // fails both comparisons.
-        if (own || !(depth >= lidarMinMaxRange.value[0] && depth <= lidarMinMaxRange.value[1])) {
+        const bool trueInRange = !noisy || inRange(frame.trueDistances[i] * depthPerMetre);
+        if (own || !trueInRange || !inRange(distance * depthPerMetre)) {
             distances[i] = nan;
             continue;
         }
